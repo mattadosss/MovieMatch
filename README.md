@@ -1,4 +1,15 @@
-# Welcome to your Expo app 👋
+# MovieMatch
+
+Eine Expo/React-Native-App, die einen Netflix-Wiedergabeverlauf importiert, Titel mit TMDb-Daten anreichert und auf Basis der Lieblingsgenres einen noch ungesehenen Film empfiehlt.
+
+## Start
+
+1. Eine TMDb API v3-Anwendung anlegen.
+2. `.env.example` nach `.env` kopieren und `EXPO_PUBLIC_TMDB_API_KEY` setzen.
+3. `npm install`
+4. `npm start`
+
+Der Import verarbeitet die 50 neuesten Einträge aus `NetflixViewingHistory.csv`. Die angereicherten Daten werden ausschließlich lokal in AsyncStorage gespeichert.
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 

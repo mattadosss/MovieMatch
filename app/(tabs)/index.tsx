@@ -1,98 +1,86 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Colors } from '@/constants/colors';
+import { useMovieMatch } from '@/context/movie-match-context';
+import { getRecommendation } from '@/lib/tmdb';
+import { useState } from 'react';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const { history, profile, setRecommendation, loading } = useMovieMatch();
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+  const max = Math.max(...profile.map((item) => item.watch_count), 1);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  async function recommend() {
+    setWorking(true);
+    setError('');
+    try {
+      setRecommendation(await getRecommendation(profile.slice(0, 2).map((item) => item.genre_id), history));
+      router.push('/recommendation');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Der Vorschlag ist fehlgeschlagen.');
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.eyebrow}>MOVIEMATCH</Text>
+      <Text style={styles.title}>Was schauen wir{'\n'}heute?</Text>
+      <Text style={styles.subtitle}>Ein Film, abgestimmt auf das, was du wirklich gern siehst.</Text>
+
+      <View style={styles.card}>
+        <View style={styles.cardHeading}>
+          <Text style={styles.cardTitle}>Dein Filmgeschmack</Text>
+          <Text style={styles.count}>{history.filter((item) => item.match_status === 'matched').length} Titel</Text>
+        </View>
+        {loading ? <ActivityIndicator color={Colors.red} /> : profile.length ? profile.slice(0, 5).map((genre) => (
+          <View key={genre.genre_id} style={styles.genreRow}>
+            <View style={styles.genreLabels}>
+              <Text style={styles.genreName}>{genre.genre_name}</Text>
+              <Text style={styles.genreCount}>{genre.watch_count}</Text>
+            </View>
+            <View style={styles.track}><View style={[styles.bar, { width: `${(genre.watch_count / max) * 100}%` }]} /></View>
+          </View>
+        )) : (
+          <View style={styles.empty}>
+            <Ionicons name="film-outline" size={34} color={Colors.muted} />
+            <Text style={styles.emptyText}>Importiere deinen Netflix-Verlauf, damit ich deinen Geschmack kennenlerne.</Text>
+          </View>
+        )}
+      </View>
+      {!!error && <Text style={styles.error}>{error}</Text>}
+      <Pressable style={({ pressed }) => [styles.button, pressed && styles.pressed, (!profile.length || working) && styles.disabled]} onPress={recommend} disabled={!profile.length || working}>
+        {working ? <ActivityIndicator color="white" /> : <><Ionicons name="play" size={18} color="white" /><Text style={styles.buttonText}>Film vorschlagen</Text></>}
+      </Pressable>
+      {!profile.length && <Pressable onPress={() => router.push('/(tabs)/explore')}><Text style={styles.link}>Jetzt Verlauf importieren →</Text></Pressable>}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  content: { flexGrow: 1, backgroundColor: Colors.background, padding: 24, paddingTop: 68, gap: 18 },
+  eyebrow: { color: Colors.red, fontSize: 13, fontWeight: '800', letterSpacing: 3 },
+  title: { color: Colors.text, fontSize: 44, lineHeight: 48, fontWeight: '800', letterSpacing: -1.5 },
+  subtitle: { color: Colors.muted, fontSize: 17, lineHeight: 25, maxWidth: 330, marginBottom: 12 },
+  card: { backgroundColor: Colors.surface, borderRadius: 24, padding: 20, gap: 18, borderWidth: 1, borderColor: Colors.border },
+  cardHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardTitle: { color: Colors.text, fontSize: 18, fontWeight: '700' },
+  count: { color: Colors.muted, fontSize: 13 },
+  genreRow: { gap: 7 },
+  genreLabels: { flexDirection: 'row', justifyContent: 'space-between' },
+  genreName: { color: Colors.text, fontSize: 14, fontWeight: '600' },
+  genreCount: { color: Colors.muted, fontSize: 13 },
+  track: { height: 7, borderRadius: 8, backgroundColor: Colors.surfaceLight, overflow: 'hidden' },
+  bar: { height: '100%', backgroundColor: Colors.red, borderRadius: 8 },
+  empty: { alignItems: 'center', gap: 12, paddingVertical: 22 },
+  emptyText: { color: Colors.muted, textAlign: 'center', lineHeight: 21 },
+  button: { minHeight: 58, backgroundColor: Colors.red, borderRadius: 18, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 },
+  buttonText: { color: 'white', fontSize: 17, fontWeight: '700' },
+  disabled: { opacity: 0.45 },
+  pressed: { transform: [{ scale: 0.98 }] },
+  error: { color: '#FF8A95', textAlign: 'center' },
+  link: { color: Colors.text, textAlign: 'center', fontWeight: '600' },
 });
