@@ -9,6 +9,10 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Next.js
+.next/
+out/
+
 # Native
 .kotlin/
 *.orig.*
@@ -39,5 +43,5 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
-/android
+**/ios
+**/android
