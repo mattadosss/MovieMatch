@@ -2,19 +2,45 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '@/constants/colors';
 import { useMovieMatch } from '@/context/movie-match-context';
-import { getRecommendation } from '@/lib/tmdb';
+import { getRecommendation, getRewatchRecommendation, getSimilarRecommendation } from '@/lib/tmdb';
+import { selectProfileGenreIds } from '@/lib/profile';
 
 export default function RecommendationScreen() {
-  const { recommendation, setRecommendation, profile, history, markRecommendationSeen } = useMovieMatch();
+  const { recommendation, setRecommendation, recommendationMode, profile, history, markRecommendationSeen } = useMovieMatch();
   const [busy, setBusy] = useState(false);
+
+  async function markSeen() {
+    setBusy(true);
+    try {
+      if (await markRecommendationSeen()) {
+        Alert.alert('Gespeichert', 'Film als gesehen markiert.');
+        router.back();
+      }
+    } catch (cause) {
+      Alert.alert('Fehler', cause instanceof Error ? cause.message : 'Der Film konnte nicht gespeichert werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function another() {
     setBusy(true);
     try {
-      setRecommendation(await getRecommendation(profile.slice(0, 2).map((item) => item.genre_id), history));
+      if (recommendationMode.type === 'similar') {
+        setRecommendation(await getSimilarRecommendation(recommendationMode.movieId, history));
+      } else if (recommendationMode.type === 'rewatch') {
+        setRecommendation(getRewatchRecommendation(history, recommendation?.tmdb_id));
+      } else {
+        const genreIds = recommendationMode.type === 'genres'
+          ? recommendationMode.genreIds
+          : selectProfileGenreIds(profile);
+        setRecommendation(await getRecommendation(genreIds, history));
+      }
+    } catch (cause) {
+      Alert.alert('Kein weiterer Film', cause instanceof Error ? cause.message : 'Der Vorschlag ist fehlgeschlagen.');
     } finally {
       setBusy(false);
     }
@@ -35,7 +61,7 @@ export default function RecommendationScreen() {
         </Text>
         <View style={styles.chips}>{recommendation.genre_names.slice(0, 3).map((genre) => <Text key={genre} style={styles.chip}>{genre}</Text>)}</View>
         <Text style={styles.overview}>{recommendation.overview || 'Für diesen Film ist keine Beschreibung verfügbar.'}</Text>
-        <Pressable style={styles.primary} onPress={markRecommendationSeen}><Ionicons name="checkmark" color="white" size={20} /><Text style={styles.primaryText}>Als gesehen markieren</Text></Pressable>
+        <Pressable style={styles.primary} onPress={markSeen} disabled={busy}><Ionicons name="checkmark" color="white" size={20} /><Text style={styles.primaryText}>Als gesehen markieren</Text></Pressable>
         <Pressable style={styles.secondary} onPress={another} disabled={busy}>
           {busy ? <ActivityIndicator color={Colors.text} /> : <><Ionicons name="shuffle" color={Colors.text} size={19} /><Text style={styles.secondaryText}>Anderen Film zeigen</Text></>}
         </Pressable>

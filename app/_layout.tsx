@@ -15,6 +15,8 @@ export default function RootLayout() {
         <Stack screenOptions={{ contentStyle: { backgroundColor: '#0A0A0B' } }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="recommendation" options={{ headerShown: false, presentation: 'modal' }} />
+          <Stack.Screen name="similar" options={{ headerShown: false }} />
+          <Stack.Screen name="genres" options={{ headerShown: false, presentation: 'modal' }} />
         </Stack>
         <StatusBar style="light" />
       </ThemeProvider>
