@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WatchHistoryEntry } from '@/types/movie';
+import { StreamingPreferences, WatchHistoryEntry, WatchProvider } from '@/types/movie';
 
 const HISTORY_KEY = '@moviematch/watch_history_entries';
 const GENRES_KEY = '@moviematch/movie_genres';
+const STREAMING_PREFERENCES_KEY = '@moviematch/streaming_preferences';
+const WATCH_PROVIDERS_KEY = '@moviematch/watch_providers_ch';
 let historyWrite = Promise.resolve();
 
 export async function loadHistory(): Promise<WatchHistoryEntry[]> {
@@ -64,6 +66,25 @@ export async function removeHistoryEntry(id: string) {
   return result;
 }
 
+export async function clearHistoryEntries(userId?: string) {
+  let result: WatchHistoryEntry[] = [];
+  historyWrite = historyWrite.catch(() => undefined).then(async () => {
+    const now = new Date().toISOString();
+    const all = (await loadHistoryIncludingDeleted()).map((entry) => {
+      const belongsToUser = userId
+        ? !entry.user_id || entry.user_id === userId
+        : !entry.user_id;
+      return belongsToUser && !entry.deleted_at
+        ? { ...entry, updated_at: now, deleted_at: now }
+        : entry;
+    });
+    await saveHistory(all);
+    result = all.filter((entry) => !entry.deleted_at);
+  });
+  await historyWrite;
+  return result;
+}
+
 export async function recordSeenEntry(entry: WatchHistoryEntry) {
   let result: WatchHistoryEntry[] = [];
   historyWrite = historyWrite.catch(() => undefined).then(async () => {
@@ -93,4 +114,41 @@ export async function loadCachedMovieGenres<T>() {
 
 export async function cacheMovieGenres<T>(genres: T) {
   await AsyncStorage.setItem(GENRES_KEY, JSON.stringify(genres));
+}
+
+export async function loadStreamingPreferences(): Promise<StreamingPreferences> {
+  const value = await AsyncStorage.getItem(STREAMING_PREFERENCES_KEY);
+  if (!value) return { provider_ids: [], updated_at: new Date(0).toISOString() };
+  try {
+    const preferences = JSON.parse(value) as StreamingPreferences;
+    return {
+      provider_ids: Array.isArray(preferences.provider_ids) ? preferences.provider_ids : [],
+      updated_at: preferences.updated_at ?? new Date(0).toISOString(),
+    };
+  } catch {
+    return { provider_ids: [], updated_at: new Date(0).toISOString() };
+  }
+}
+
+export async function saveStreamingPreferences(preferences: StreamingPreferences) {
+  await AsyncStorage.setItem(STREAMING_PREFERENCES_KEY, JSON.stringify(preferences));
+}
+
+export async function loadCachedWatchProviders(maxAgeMs: number): Promise<WatchProvider[] | null> {
+  const value = await AsyncStorage.getItem(WATCH_PROVIDERS_KEY);
+  if (!value) return null;
+  try {
+    const cached = JSON.parse(value) as { providers: WatchProvider[]; cached_at: string };
+    if (Date.now() - Date.parse(cached.cached_at) > maxAgeMs) return null;
+    return cached.providers;
+  } catch {
+    return null;
+  }
+}
+
+export async function cacheWatchProviders(providers: WatchProvider[]) {
+  await AsyncStorage.setItem(WATCH_PROVIDERS_KEY, JSON.stringify({
+    providers,
+    cached_at: new Date().toISOString(),
+  }));
 }

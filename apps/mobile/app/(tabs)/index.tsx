@@ -8,7 +8,7 @@ import { selectProfileGenreIds } from '@/lib/profile';
 import { useState } from 'react';
 
 export default function HomeScreen() {
-  const { history, profile, setRecommendation, setRecommendationMode, loading } = useMovieMatch();
+  const { history, profile, preferredProviderIds, setRecommendation, setRecommendationMode, loading } = useMovieMatch();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
   const max = Math.max(...profile.map((item) => item.watch_count), 1);
@@ -18,7 +18,7 @@ export default function HomeScreen() {
     setError('');
     try {
       const genreIds = selectProfileGenreIds(profile);
-      setRecommendation(await getRecommendation(genreIds, history));
+      setRecommendation(await getRecommendation(genreIds, history, preferredProviderIds));
       setRecommendationMode({ type: 'profile' });
       router.push('/recommendation');
     } catch (cause) {
@@ -28,14 +28,17 @@ export default function HomeScreen() {
     }
   }
 
-  function recommendRewatch() {
+  async function recommendRewatch() {
+    setWorking(true);
     setError('');
     try {
-      setRecommendation(getRewatchRecommendation(history));
+      setRecommendation(await getRewatchRecommendation(history, undefined, preferredProviderIds));
       setRecommendationMode({ type: 'rewatch' });
       router.push('/recommendation');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Kein Film zum Wiederanschauen gefunden.');
+    } finally {
+      setWorking(false);
     }
   }
 

@@ -8,7 +8,7 @@ import { getMovieGenres, getRecommendation } from '@/lib/tmdb';
 import { MovieGenre } from '@/types/movie';
 
 export default function GenresScreen() {
-  const { history, setRecommendation, setRecommendationMode } = useMovieMatch();
+  const { history, preferredProviderIds, setRecommendation, setRecommendationMode } = useMovieMatch();
   const [genres, setGenres] = useState<MovieGenre[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(true);
@@ -26,7 +26,7 @@ export default function GenresScreen() {
   async function recommend() {
     setBusy(true); setError('');
     try {
-      setRecommendation(await getRecommendation(selected, history));
+      setRecommendation(await getRecommendation(selected, history, preferredProviderIds));
       setRecommendationMode({ type: 'genres', genreIds: [...selected] });
       router.replace('/recommendation');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Kein Vorschlag gefunden.'); }

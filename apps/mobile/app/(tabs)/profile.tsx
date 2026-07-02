@@ -1,16 +1,57 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/context/auth-context';
 import { useMovieMatch } from '@/context/movie-match-context';
+import { getMovieWatchProviders } from '@/lib/tmdb';
+import type { WatchProvider } from '@/types/movie';
 
 export default function ProfileScreen() {
   const { user, loading, signOut } = useAuth();
-  const { syncNow, syncStatus, syncError } = useMovieMatch();
+  const {
+    clearHistory,
+    preferredProviderIds,
+    syncNow,
+    syncStatus,
+    syncError,
+    togglePreferredProvider,
+  } = useMovieMatch();
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [providers, setProviders] = useState<WatchProvider[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [providersError, setProvidersError] = useState('');
+  const [providerQuery, setProviderQuery] = useState('');
+  const [clearBusy, setClearBusy] = useState(false);
+  const [clearError, setClearError] = useState('');
+
+  useEffect(() => {
+    if (!user) return;
+    setProvidersLoading(true);
+    setProvidersError('');
+    getMovieWatchProviders()
+      .then(setProviders)
+      .catch((cause) => setProvidersError(
+        cause instanceof Error ? cause.message : 'Streaming-Anbieter konnten nicht geladen werden.',
+      ))
+      .finally(() => setProvidersLoading(false));
+  }, [user]);
+
+  const sortedProviders = useMemo(() => providers
+    .filter((provider) => provider.provider_name.toLocaleLowerCase('de')
+      .includes(providerQuery.trim().toLocaleLowerCase('de')))
+    .sort((a, b) => {
+      const aSelected = preferredProviderIds.includes(a.provider_id);
+      const bSelected = preferredProviderIds.includes(b.provider_id);
+      if (aSelected !== bSelected) return aSelected ? -1 : 1;
+      return a.display_priority - b.display_priority;
+    }), [preferredProviderIds, providerQuery, providers]);
+  const visibleProviders = providerQuery.trim()
+    ? sortedProviders
+    : sortedProviders.slice(0, 25);
 
   async function logout() {
     setLogoutBusy(true);
@@ -22,6 +63,32 @@ export default function ProfileScreen() {
     } finally {
       setLogoutBusy(false);
     }
+  }
+
+  function confirmClearHistory() {
+    Alert.alert(
+      'Gesamten Verlauf löschen?',
+      'Alle Filme werden lokal und aus deinem synchronisierten Supabase-Verlauf gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Alles löschen',
+          style: 'destructive',
+          onPress: async () => {
+            setClearBusy(true);
+            setClearError('');
+            try {
+              await clearHistory();
+              Alert.alert('Verlauf gelöscht', 'Dein gesamter Filmverlauf wurde gelöscht.');
+            } catch (cause) {
+              setClearError(cause instanceof Error ? cause.message : 'Der Verlauf konnte nicht vollständig gelöscht werden.');
+            } finally {
+              setClearBusy(false);
+            }
+          },
+        },
+      ],
+    );
   }
 
   return (
@@ -39,6 +106,22 @@ export default function ProfileScreen() {
               <Text style={styles.label}>ANGEMELDET ALS</Text>
               <Text style={styles.email} numberOfLines={1}>{user.email}</Text>
             </View>
+          </View>
+
+          <View style={styles.dangerCard}>
+            <View style={styles.row}>
+              <Ionicons name="trash-outline" color="#FF8A95" size={25} />
+              <View style={styles.rowText}>
+                <Text style={styles.cardTitle}>Verlauf zurücksetzen</Text>
+                <Text style={styles.description}>Löscht alle Filme auf diesem Gerät und in deinem Cloud-Konto.</Text>
+              </View>
+            </View>
+            {!!clearError && <Text style={styles.error}>{clearError}</Text>}
+            <Pressable disabled={clearBusy} onPress={confirmClearHistory} style={styles.dangerButton}>
+              {clearBusy
+                ? <ActivityIndicator color="#FF8A95" />
+                : <Text style={styles.dangerButtonText}>Gesamten Verlauf löschen</Text>}
+            </Pressable>
           </View>
 
           <View style={styles.card}>
@@ -61,6 +144,68 @@ export default function ProfileScreen() {
                 ? <ActivityIndicator color="white" />
                 : <><Ionicons name="sync" color="white" size={18} /><Text style={styles.primaryText}>Jetzt synchronisieren</Text></>}
             </Pressable>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <Ionicons name="tv-outline" color={Colors.red} size={26} />
+              <View style={styles.rowText}>
+                <Text style={styles.cardTitle}>Deine Streaming-Anbieter</Text>
+                <Text style={styles.description}>
+                  Bevorzugte Dienste werden bei Filmvorschlägen zuerst berücksichtigt.
+                </Text>
+              </View>
+            </View>
+            <View style={styles.search}>
+              <Ionicons name="search" color={Colors.muted} size={18} />
+              <TextInput
+                value={providerQuery}
+                onChangeText={setProviderQuery}
+                placeholder="Anbieter suchen"
+                placeholderTextColor={Colors.muted}
+                autoCorrect={false}
+                style={styles.searchInput}
+              />
+              {!!providerQuery && (
+                <Pressable onPress={() => setProviderQuery('')} hitSlop={10}>
+                  <Ionicons name="close-circle" color={Colors.muted} size={19} />
+                </Pressable>
+              )}
+            </View>
+            {providersLoading && <ActivityIndicator color={Colors.red} />}
+            {!!providersError && <Text style={styles.error}>{providersError}</Text>}
+            <View style={styles.providerGrid}>
+              {visibleProviders.map((provider) => {
+                const selected = preferredProviderIds.includes(provider.provider_id);
+                return (
+                  <Pressable
+                    key={provider.provider_id}
+                    onPress={() => togglePreferredProvider(provider.provider_id)}
+                    style={({ pressed }) => [
+                      styles.provider,
+                      selected && styles.providerSelected,
+                      pressed && styles.pressed,
+                    ]}>
+                    {provider.logo_path
+                      ? <Image source={`https://image.tmdb.org/t/p/w92${provider.logo_path}`} style={styles.providerLogo} />
+                      : <View style={styles.providerLogo} />}
+                    <Text style={styles.providerName} numberOfLines={2}>{provider.provider_name}</Text>
+                    <Ionicons
+                      name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                      color={selected ? Colors.success : Colors.muted}
+                      size={20}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!providersLoading && !sortedProviders.length && (
+              <Text style={styles.description}>Kein Anbieter gefunden.</Text>
+            )}
+            {!providerQuery && sortedProviders.length > visibleProviders.length && (
+              <Text style={styles.description}>Weitere Anbieter findest du über die Suche.</Text>
+            )}
+            <Text style={styles.attribution}>Streamingdaten von JustWatch · Region Schweiz</Text>
           </View>
 
           {!!logoutError && <Text style={styles.error}>{logoutError}</Text>}
@@ -108,4 +253,15 @@ const styles = StyleSheet.create({
   error: { color: '#FF8A95', textAlign: 'center', lineHeight: 20 },
   logout: { alignSelf: 'center', padding: 14 },
   logoutText: { color: '#FF8A95', fontWeight: '700' },
+  providerGrid: { gap: 8 },
+  provider: { minHeight: 58, padding: 9, flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 15, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background },
+  providerSelected: { borderColor: Colors.red, backgroundColor: '#271217' },
+  providerLogo: { width: 40, height: 40, borderRadius: 10, backgroundColor: Colors.surfaceLight },
+  providerName: { flex: 1, color: Colors.text, fontSize: 13, fontWeight: '600' },
+  attribution: { color: Colors.muted, fontSize: 10, textAlign: 'center' },
+  search: { height: 48, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 15, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background },
+  searchInput: { flex: 1, height: '100%', color: Colors.text, fontSize: 14 },
+  dangerCard: { padding: 20, gap: 16, borderRadius: 24, backgroundColor: Colors.surface, borderWidth: 1, borderColor: '#57252B' },
+  dangerButton: { minHeight: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 15, borderWidth: 1, borderColor: '#8B3540', backgroundColor: '#281216' },
+  dangerButtonText: { color: '#FF8A95', fontSize: 14, fontWeight: '700' },
 });

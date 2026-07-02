@@ -1,9 +1,18 @@
-import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { loadHistory, mergeHistory, recordSeenEntry, removeHistoryEntry } from '@/lib/storage';
+import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  loadHistory,
+  loadStreamingPreferences,
+  clearHistoryEntries,
+  mergeHistory,
+  recordSeenEntry,
+  removeHistoryEntry,
+  saveStreamingPreferences,
+} from '@/lib/storage';
 import { buildGenreProfile } from '@/lib/profile';
 import { syncHistory } from '@/lib/sync';
 import { Recommendation, RecommendationMode, WatchHistoryEntry } from '@/types/movie';
 import { useAuth } from '@/context/auth-context';
+import { syncStreamingPreferences } from '@/lib/preferences';
 
 type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
@@ -16,10 +25,13 @@ type ContextValue = {
   setRecommendationMode: (value: RecommendationMode) => void;
   addHistory: (entries: WatchHistoryEntry[]) => Promise<void>;
   removeHistory: (id: string) => Promise<void>;
-  markRecommendationSeen: () => Promise<boolean>;
+  clearHistory: () => Promise<void>;
+  markRecommendationSeen: () => Promise<WatchHistoryEntry[] | null>;
   syncNow: () => Promise<void>;
   syncStatus: SyncStatus;
   syncError: string;
+  preferredProviderIds: number[];
+  togglePreferredProvider: (providerId: number) => Promise<void>;
   loading: boolean;
 };
 
@@ -33,9 +45,16 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [syncError, setSyncError] = useState('');
+  const [preferredProviderIds, setPreferredProviderIds] = useState<number[]>([]);
+  const preferencesSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    loadHistory().then(setHistory).finally(() => setLoading(false));
+    Promise.all([loadHistory(), loadStreamingPreferences()])
+      .then(([entries, preferences]) => {
+        setHistory(entries);
+        setPreferredProviderIds(preferences.provider_ids);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const syncNow = useCallback(async () => {
@@ -43,7 +62,12 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
     setSyncStatus('syncing');
     setSyncError('');
     try {
-      setHistory(await syncHistory(user));
+      const [entries, preferences] = await Promise.all([
+        syncHistory(user),
+        syncStreamingPreferences(user),
+      ]);
+      setHistory(entries);
+      setPreferredProviderIds(preferences.provider_ids);
       setSyncStatus('success');
     } catch (cause) {
       setSyncStatus('error');
@@ -51,6 +75,31 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
       throw cause;
     }
   }, [user]);
+
+  const togglePreferredProvider = useCallback(async (providerId: number) => {
+    const providerIds = preferredProviderIds.includes(providerId)
+      ? preferredProviderIds.filter((id) => id !== providerId)
+      : [...preferredProviderIds, providerId];
+    const preferences = { provider_ids: providerIds, updated_at: new Date().toISOString() };
+    setPreferredProviderIds(providerIds);
+    await saveStreamingPreferences(preferences);
+    if (user) {
+      if (preferencesSyncTimer.current) clearTimeout(preferencesSyncTimer.current);
+      preferencesSyncTimer.current = setTimeout(() => {
+        setSyncStatus('syncing');
+        syncStreamingPreferences(user)
+          .then(() => setSyncStatus('success'))
+          .catch((cause) => {
+            setSyncStatus('error');
+            setSyncError(cause instanceof Error ? cause.message : 'Streaming-Anbieter konnten nicht synchronisiert werden.');
+          });
+      }, 800);
+    }
+  }, [preferredProviderIds, user]);
+
+  useEffect(() => () => {
+    if (preferencesSyncTimer.current) clearTimeout(preferencesSyncTimer.current);
+  }, []);
 
   useEffect(() => {
     if (user && !loading) syncNow().catch(() => undefined);
@@ -67,8 +116,14 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
     if (user) syncNow().catch(() => undefined);
   }, [syncNow, user]);
 
+  const clearHistory = useCallback(async () => {
+    if (user) await syncHistory(user).catch(() => undefined);
+    setHistory(await clearHistoryEntries(user?.id));
+    if (user) setHistory(await syncHistory(user));
+  }, [user]);
+
   const markRecommendationSeen = useCallback(async () => {
-    if (!recommendation) return false;
+    if (!recommendation) return null;
     const now = new Date().toISOString();
     const entry: WatchHistoryEntry = {
       id: `${Date.now()}-${recommendation.tmdb_id}`, raw_title: recommendation.title,
@@ -76,21 +131,23 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
       media_type: 'movie', genre_ids: recommendation.genre_ids, genre_names: recommendation.genre_names,
       runtime_minutes: recommendation.runtime_minutes, vote_average: recommendation.vote_average,
       release_year: recommendation.release_year, poster_path: recommendation.poster_path,
+      watch_providers: recommendation.watch_providers,
+      watch_provider_link: recommendation.watch_provider_link,
       match_status: 'matched', created_at: now, source: 'marked_from_suggestion',
     };
     const next = await recordSeenEntry(entry);
     setHistory(next);
     if (user) syncNow().catch(() => undefined);
-    setRecommendation(null);
-    return true;
+    return next;
   }, [recommendation, syncNow, user]);
 
   const value = useMemo(() => ({
     history, profile: buildGenreProfile(history), recommendation, setRecommendation,
     recommendationMode, setRecommendationMode,
-    addHistory, removeHistory, markRecommendationSeen, loading,
+    addHistory, removeHistory, clearHistory, markRecommendationSeen, loading,
     syncNow, syncStatus, syncError,
-  }), [addHistory, history, loading, markRecommendationSeen, recommendation, recommendationMode, removeHistory, syncError, syncNow, syncStatus]);
+    preferredProviderIds, togglePreferredProvider,
+  }), [addHistory, clearHistory, history, loading, markRecommendationSeen, preferredProviderIds, recommendation, recommendationMode, removeHistory, syncError, syncNow, syncStatus, togglePreferredProvider]);
 
   return <MovieMatchContext.Provider value={value}>{children}</MovieMatchContext.Provider>;
 }

@@ -12,6 +12,8 @@ create table if not exists public.watch_history_entries (
   vote_average double precision,
   release_year integer,
   poster_path text,
+  watch_providers jsonb not null default '[]'::jsonb,
+  watch_provider_link text,
   match_status text not null check (match_status in ('matched', 'unmatched')),
   source text not null check (source in ('netflix_csv', 'manual', 'marked_from_suggestion')),
   created_at timestamptz not null default now(),

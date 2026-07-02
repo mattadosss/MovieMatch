@@ -16,7 +16,8 @@ packages/  Platz für künftig gemeinsam genutzte Pakete
 
 - Node.js 20.19 oder neuer
 - npm 11 oder neuer
-- ein TMDb API-v3-Schlüssel für die mobile App
+- ein Supabase-Projekt
+- ein TMDb **API Read Access Token** für die Edge Functions
 
 ## Installation
 
@@ -28,7 +29,6 @@ Für die mobile App `apps/mobile/.env.example` nach `apps/mobile/.env` kopieren
 und die folgenden Werte setzen:
 
 ```dotenv
-EXPO_PUBLIC_TMDB_API_KEY=...
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 EXPO_PUBLIC_AUTH_REDIRECT_URL=https://moviematchweb.vercel.app/auth/callback
@@ -42,11 +42,11 @@ in der App niemals einen Supabase Secret Key oder Service-Role-Key.
 1. Im Supabase-Dashboard ein Projekt erstellen.
 2. Unter **Project Settings → API** die Project URL und den Publishable Key
    kopieren und in `apps/mobile/.env` eintragen.
-3. Im **SQL Editor** den Inhalt von
-   `supabase/migrations/202607020001_create_watch_history_entries.sql`
-   ausführen. Die Migration erstellt die Verlaufstabelle, aktiviert Row Level
-   Security und erlaubt angemeldeten Benutzern ausschließlich Zugriff auf ihre
-   eigenen Datensätze.
+3. Im **SQL Editor** die Dateien aus `supabase/migrations` in zeitlicher
+   Reihenfolge ausführen oder sie mit `supabase db push` anwenden. Die
+   Migrationen erstellen die Verlaufstabelle einschließlich Streaming-Anbietern,
+   aktivieren Row Level Security und erlauben angemeldeten Benutzern
+   ausschließlich Zugriff auf ihre eigenen Datensätze.
 4. Unter **Authentication → Providers → Email** E-Mail/Passwort aktivieren.
    Falls **Confirm email** aktiv ist, muss ein neues Konto vor der ersten
    Anmeldung über die empfangene E-Mail bestätigt werden.
@@ -64,6 +64,45 @@ in der App niemals einen Supabase Secret Key oder Service-Role-Key.
    Link `{{ .RedirectTo }}` statt `{{ .SiteURL }}` verwenden.
 6. Den Expo-Dev-Server nach Änderungen an `.env` neu starten.
 
+### TMDb Edge Functions
+
+Die Expo-App enthält keinen TMDb-Schlüssel und ruft TMDb nicht direkt auf.
+Suche, Trends, Filmdetails, Genres, Empfehlungen und Streaming-Verfügbarkeit
+laufen über Supabase Edge Functions. Der Token liegt ausschließlich als
+Supabase Secret vor.
+
+Einmalig anmelden, das Projekt verknüpfen und den TMDb **API Read Access Token**
+als Secret setzen:
+
+```bash
+npx supabase login
+npx supabase link --project-ref <project-ref>
+npx supabase secrets set TMDB_ACCESS_TOKEN=<your_tmdb_bearer_token>
+```
+
+Danach die Functions deployen:
+
+```bash
+npx supabase functions deploy search-movies
+npx supabase functions deploy trending
+npx supabase functions deploy movie-details
+```
+
+Die Functions akzeptieren sowohl eingeloggte Benutzer als auch den
+Publishable-Key der App für den Gastmodus. `movie-details` erlaubt nur fest
+definierte TMDb-Operationen und ist kein frei verwendbarer URL-Proxy.
+
+Für lokale Function-Entwicklung kann der Token in einer nicht eingecheckten
+Datei wie `supabase/functions/.env` stehen:
+
+```dotenv
+TMDB_ACCESS_TOKEN=your_tmdb_bearer_token
+```
+
+```bash
+npx supabase functions serve --env-file supabase/functions/.env
+```
+
 ### Offline-First-Synchronisierung
 
 - Der Verlauf wird weiterhin zuerst lokal in AsyncStorage geschrieben. Die App
@@ -72,6 +111,11 @@ in der App niemals einen Supabase Secret Key oder Service-Role-Key.
   `localStorage`-Implementierung über App-Neustarts hinweg gespeichert.
 - Bei Anmeldung, lokalen Änderungen und über **Jetzt synchronisieren** wird der
   Verlauf in beide Richtungen abgeglichen.
+- Bevorzugte Schweizer Streaming-Anbieter werden ebenfalls lokal gespeichert
+  und mit dem Benutzerkonto synchronisiert. Empfehlungen priorisieren Titel,
+  die bei diesen Diensten im Abo, kostenlos oder werbefinanziert verfügbar sind.
+  Gibt es keinen passenden Treffer, verwendet MovieMatch die normale Auswahl
+  als Fallback.
 - Haben Lokal- und Cloud-Version dieselbe ID, gewinnt der neuere
   `updated_at`-Zeitstempel.
 - Löschungen werden als `deleted_at`-Tombstone synchronisiert, damit offline

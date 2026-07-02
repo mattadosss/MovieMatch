@@ -1,10 +1,25 @@
 import { filterUnwatchedCandidates, randomTopCandidate } from '@/lib/candidates';
 import { CsvWatch } from '@/lib/csv';
-import { cacheMovieGenres, loadCachedMovieGenres } from '@/lib/storage';
-import { MovieGenre, MovieSearchResult, Recommendation, WatchHistoryEntry, WatchSource } from '@/types/movie';
+import { supabase } from '@/src/lib/supabase';
+import { FunctionsHttpError } from '@supabase/supabase-js';
+import {
+  cacheMovieGenres,
+  cacheWatchProviders,
+  loadCachedMovieGenres,
+  loadCachedWatchProviders,
+} from '@/lib/storage';
+import {
+  MediaType,
+  MovieGenre,
+  MovieSearchResult,
+  Recommendation,
+  WatchHistoryEntry,
+  WatchProvider,
+  WatchProviderAvailability,
+  WatchProviderType,
+  WatchSource,
+} from '@/types/movie';
 
-const BASE_URL = 'https://api.themoviedb.org/3';
-const apiKey = process.env.EXPO_PUBLIC_TMDB_API_KEY;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type Genre = { id: number; name: string };
@@ -13,17 +28,99 @@ type SearchResult = {
   vote_average: number; release_date?: string; first_air_date?: string; poster_path: string | null;
   overview?: string;
 };
+type Provider = {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string | null;
+};
+type ProviderRegion = {
+  link?: string;
+  flatrate?: Provider[];
+  free?: Provider[];
+  ads?: Provider[];
+  rent?: Provider[];
+  buy?: Provider[];
+};
 
-function requireKey() {
-  if (!apiKey) throw new Error('EXPO_PUBLIC_TMDB_API_KEY ist nicht konfiguriert.');
+async function invokeTmdb<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (!error) return data as T;
+
+  if (error instanceof FunctionsHttpError) {
+    let response: { error?: string } | null = null;
+    try {
+      response = await error.context.json() as { error?: string };
+    } catch {}
+    if (response?.error) throw new Error(response.error);
+  }
+  throw new Error(`TMDb-Proxy ist nicht erreichbar: ${error.message}`);
 }
 
 async function request<T>(path: string, params: Record<string, string> = {}): Promise<T> {
-  requireKey();
-  const query = new URLSearchParams({ api_key: apiKey!, language: 'de-DE', ...params });
-  const response = await fetch(`${BASE_URL}${path}?${query}`);
-  if (!response.ok) throw new Error(`TMDb-Anfrage fehlgeschlagen (${response.status}).`);
-  return response.json() as Promise<T>;
+  const search = path.match(/^\/search\/(movie|tv)$/);
+  if (search) {
+    return invokeTmdb<T>('search-movies', {
+      query: params.query,
+      mediaType: search[1],
+    });
+  }
+
+  const genres = path.match(/^\/genre\/(movie|tv)\/list$/);
+  if (genres) {
+    return invokeTmdb<T>('movie-details', {
+      operation: 'genres',
+      mediaType: genres[1],
+    });
+  }
+
+  if (path === '/watch/providers/movie') {
+    return invokeTmdb<T>('movie-details', {
+      operation: 'watch-provider-list',
+      region: params.watch_region ?? 'CH',
+    });
+  }
+
+  if (path === '/discover/movie') {
+    return invokeTmdb<T>('movie-details', {
+      operation: 'discover',
+      params,
+    });
+  }
+
+  const related = path.match(/^\/movie\/(\d+)\/(recommendations|similar)$/);
+  if (related) {
+    return invokeTmdb<T>('movie-details', {
+      operation: related[2],
+      id: Number(related[1]),
+    });
+  }
+
+  const providers = path.match(/^\/(movie|tv)\/(\d+)\/watch\/providers$/);
+  if (providers) {
+    return invokeTmdb<T>('movie-details', {
+      operation: 'watch-providers',
+      mediaType: providers[1],
+      id: Number(providers[2]),
+    });
+  }
+
+  const details = path.match(/^\/(movie|tv)\/(\d+)$/);
+  if (details) {
+    return invokeTmdb<T>('movie-details', {
+      operation: 'details',
+      mediaType: details[1],
+      id: Number(details[2]),
+    });
+  }
+
+  throw new Error(`Nicht unterstützte TMDb-Operation: ${path}`);
+}
+
+export async function getTrendingMovies() {
+  return invokeTmdb<{ results: SearchResult[] }>('trending', {
+    mediaType: 'movie',
+    timeWindow: 'week',
+  });
 }
 
 export async function loadGenres() {
@@ -40,6 +137,31 @@ export async function getMovieGenres(): Promise<MovieGenre[]> {
   const data = await request<{ genres: MovieGenre[] }>('/genre/movie/list');
   await cacheMovieGenres(data.genres);
   return data.genres;
+}
+
+export async function getWatchProviders(mediaType: MediaType, id: number, region = 'CH') {
+  const data = await request<{ results: Record<string, ProviderRegion> }>(
+    `/${mediaType}/${id}/watch/providers`,
+  );
+  const availability = data.results[region];
+  if (!availability) return { providers: [] as WatchProviderAvailability[], link: null };
+
+  const types: WatchProviderType[] = ['flatrate', 'free', 'ads', 'rent', 'buy'];
+  const providers = types.flatMap((type) =>
+    (availability[type] ?? []).map((provider) => ({ ...provider, type })));
+
+  return { providers, link: availability.link ?? null };
+}
+
+export async function getMovieWatchProviders(region = 'CH'): Promise<WatchProvider[]> {
+  const cached = await loadCachedWatchProviders(7 * 24 * 60 * 60 * 1000);
+  if (cached?.length) return cached;
+  const data = await request<{ results: WatchProvider[] }>('/watch/providers/movie', {
+    watch_region: region,
+  });
+  const providers = data.results.sort((a, b) => a.display_priority - b.display_priority);
+  await cacheWatchProviders(providers);
+  return providers;
 }
 
 function uuid() {
@@ -67,9 +189,10 @@ export async function movieToHistoryEntry(
   movie: MovieSearchResult,
   source: WatchSource = 'manual',
 ): Promise<WatchHistoryEntry> {
-  const [genres, details] = await Promise.all([
+  const [genres, details, availability] = await Promise.all([
     getMovieGenres(),
     request<{ runtime?: number }>(`/movie/${movie.tmdb_id}`),
+    getWatchProviders('movie', movie.tmdb_id),
   ]);
   const names = new Map(genres.map((genre) => [genre.id, genre.name]));
   const now = new Date().toISOString();
@@ -79,6 +202,7 @@ export async function movieToHistoryEntry(
     genre_names: movie.genre_ids.map((id) => names.get(id) ?? 'Unbekannt'),
     runtime_minutes: details.runtime ?? null, vote_average: movie.vote_average,
     release_year: movie.release_year, poster_path: movie.poster_path,
+    watch_providers: availability.providers, watch_provider_link: availability.link,
     match_status: 'matched', created_at: now, source,
   };
 }
@@ -101,7 +225,10 @@ export async function enrichWatch(
     vote_average: null, release_year: null, poster_path: null, match_status: 'unmatched',
     created_at: created, source: 'netflix_csv',
   };
-  const details = await request<{ runtime?: number; episode_run_time?: number[] }>(`/${mediaType}/${result.id}`);
+  const [details, availability] = await Promise.all([
+    request<{ runtime?: number; episode_run_time?: number[] }>(`/${mediaType}/${result.id}`),
+    getWatchProviders(mediaType, result.id),
+  ]);
   const genreMap = new Map(genres[mediaType].map((genre) => [genre.id, genre.name]));
   const date = result.release_date ?? result.first_air_date;
   return {
@@ -111,6 +238,7 @@ export async function enrichWatch(
     runtime_minutes: details.runtime ?? details.episode_run_time?.[0] ?? null,
     vote_average: result.vote_average, release_year: date ? Number(date.slice(0, 4)) : null,
     poster_path: result.poster_path, match_status: 'matched', created_at: created, source: 'netflix_csv',
+    watch_providers: availability.providers, watch_provider_link: availability.link,
   };
 }
 
@@ -130,9 +258,10 @@ export async function importWatches(watches: CsvWatch[], onProgress: (completed:
 }
 
 async function toRecommendation(result: SearchResult): Promise<Recommendation> {
-  const [genres, details] = await Promise.all([
+  const [genres, details, availability] = await Promise.all([
     getMovieGenres(),
     request<{ runtime?: number }>(`/movie/${result.id}`),
+    getWatchProviders('movie', result.id),
   ]);
   const names = new Map(genres.map((genre) => [genre.id, genre.name]));
   return {
@@ -142,36 +271,87 @@ async function toRecommendation(result: SearchResult): Promise<Recommendation> {
     vote_average: Number.isFinite(result.vote_average) ? result.vote_average : 0,
     release_year: result.release_date ? Number(result.release_date.slice(0, 4)) : null,
     poster_path: result.poster_path,
+    watch_providers: availability.providers,
+    watch_provider_link: availability.link,
   };
 }
 
-async function choose(results: SearchResult[], history: WatchHistoryEntry[], message: string) {
-  const candidate = randomTopCandidate(filterUnwatchedCandidates(results, history));
+async function prioritizePreferredProviders(
+  results: SearchResult[],
+  preferredProviderIds: number[],
+) {
+  if (!preferredProviderIds.length) return results;
+  const preferred = new Set(preferredProviderIds);
+  const checked = await Promise.all(results.slice(0, 5).map(async (result) => ({
+    result,
+    availability: await getWatchProviders('movie', result.id).catch(() => null),
+  })));
+  const matches = checked
+    .filter(({ availability }) => availability?.providers.some((provider) =>
+      preferred.has(provider.provider_id)
+      && ['flatrate', 'free', 'ads'].includes(provider.type)))
+    .map(({ result }) => result);
+  return matches.length ? matches : results;
+}
+
+async function choose(
+  results: SearchResult[],
+  history: WatchHistoryEntry[],
+  message: string,
+  preferredProviderIds: number[] = [],
+) {
+  const unseen = filterUnwatchedCandidates(results, history);
+  const prioritized = await prioritizePreferredProviders(unseen, preferredProviderIds);
+  const candidate = randomTopCandidate(prioritized);
   if (!candidate) throw new Error(message);
   return toRecommendation(candidate);
 }
 
-export async function getRecommendation(genreIds: number[], history: WatchHistoryEntry[]) {
+export async function getRecommendation(
+  genreIds: number[],
+  history: WatchHistoryEntry[],
+  preferredProviderIds: number[] = [],
+) {
   if (!genreIds.length) throw new Error('Wähle mindestens ein Genre oder importiere zuerst deinen Verlauf.');
-  const data = await request<{ results: SearchResult[] }>('/discover/movie', {
+  const baseParams = {
     with_genres: genreIds.slice(0, 3).join(','),
     'vote_average.gte': '6.5', 'vote_count.gte': '100', sort_by: 'popularity.desc',
-  });
+  };
+  if (preferredProviderIds.length) {
+    const preferred = await request<{ results: SearchResult[] }>('/discover/movie', {
+      ...baseParams,
+      watch_region: 'CH',
+      with_watch_providers: preferredProviderIds.join('|'),
+      with_watch_monetization_types: 'flatrate|free|ads',
+    });
+    if (filterUnwatchedCandidates(preferred.results, history).length) {
+      return choose(preferred.results, history, 'Für diese Auswahl wurde kein ungesehener Film gefunden.');
+    }
+  }
+  const data = await request<{ results: SearchResult[] }>('/discover/movie', baseParams);
   return choose(data.results, history, 'Für diese Auswahl wurde kein ungesehener Film gefunden.');
 }
 
-export async function getSimilarRecommendation(movieId: number, history: WatchHistoryEntry[]) {
+export async function getSimilarRecommendation(
+  movieId: number,
+  history: WatchHistoryEntry[],
+  preferredProviderIds: number[] = [],
+) {
   const recommendations = await request<{ results: SearchResult[] }>(`/movie/${movieId}/recommendations`);
   const unseen = filterUnwatchedCandidates(recommendations.results, history);
-  if (unseen.length) return toRecommendation(randomTopCandidate(unseen));
+  if (unseen.length) {
+    const prioritized = await prioritizePreferredProviders(unseen, preferredProviderIds);
+    return toRecommendation(randomTopCandidate(prioritized));
+  }
   const similar = await request<{ results: SearchResult[] }>(`/movie/${movieId}/similar`);
-  return choose(similar.results, history, 'Keine passenden ungesehenen Filme gefunden.');
+  return choose(similar.results, history, 'Keine passenden ungesehenen Filme gefunden.', preferredProviderIds);
 }
 
-export function getRewatchRecommendation(
+export async function getRewatchRecommendation(
   history: WatchHistoryEntry[],
   excludeMovieId?: number,
-): Recommendation {
+  preferredProviderIds: number[] = [],
+): Promise<Recommendation> {
   const now = Date.now();
   const minimumAgeMs = 180 * 24 * 60 * 60 * 1000;
   const oldest = history
@@ -184,10 +364,29 @@ export function getRewatchRecommendation(
       && now - new Date(entry.watch_date).getTime() >= minimumAgeMs)
     .sort((a, b) => new Date(a.watch_date).getTime() - new Date(b.watch_date).getTime())
     .slice(0, 10);
-  const entry = randomTopCandidate(oldest);
+  let candidates = oldest;
+  if (preferredProviderIds.length) {
+    const preferred = new Set(preferredProviderIds);
+    const checked = await Promise.all(oldest.map(async (item) => ({
+      item,
+      availability: item.watch_providers?.length
+        ? { providers: item.watch_providers }
+        : await getWatchProviders('movie', item.tmdb_id!).catch(() => null),
+    })));
+    const matches = checked
+      .filter(({ availability }) => availability?.providers.some((provider) =>
+        preferred.has(provider.provider_id)
+        && ['flatrate', 'free', 'ads'].includes(provider.type)))
+      .map(({ item }) => item);
+    if (matches.length) candidates = matches;
+  }
+  const entry = randomTopCandidate(candidates);
   if (!entry || entry.tmdb_id == null) {
     throw new Error('Du hast noch keinen Film im Verlauf, den du seit mindestens 6 Monaten nicht mehr gesehen hast.');
   }
+  const availability = entry.watch_providers?.length
+    ? { providers: entry.watch_providers, link: entry.watch_provider_link ?? null }
+    : await getWatchProviders('movie', entry.tmdb_id);
   return {
     tmdb_id: entry.tmdb_id,
     title: entry.parsed_title,
@@ -198,5 +397,7 @@ export function getRewatchRecommendation(
     vote_average: entry.vote_average ?? 0,
     release_year: entry.release_year,
     poster_path: entry.poster_path,
+    watch_providers: availability.providers,
+    watch_provider_link: availability.link,
   };
 }

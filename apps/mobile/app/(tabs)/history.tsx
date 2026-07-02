@@ -5,6 +5,7 @@ import { Alert, FlatList, ListRenderItem, Pressable, StyleSheet, Text, TextInput
 import { Colors } from '@/constants/colors';
 import { useMovieMatch } from '@/context/movie-match-context';
 import { WatchHistoryEntry } from '@/types/movie';
+import { formatWatchProviders } from '@/lib/providers';
 
 const HistoryRow = memo(function HistoryRow({
   item,
@@ -13,6 +14,7 @@ const HistoryRow = memo(function HistoryRow({
   item: WatchHistoryEntry;
   onDelete: (id: string, title: string) => void;
 }) {
+  const providers = formatWatchProviders(item.watch_providers);
   return (
     <View style={styles.row}>
       {item.poster_path
@@ -26,6 +28,11 @@ const HistoryRow = memo(function HistoryRow({
           item.runtime_minutes ? `${item.runtime_minutes} Min.` : null,
         ].filter(Boolean).join(' · ')}</Text>
         <Text style={styles.genres} numberOfLines={1}>{item.genre_names.slice(0, 3).join(', ') || 'Nicht erkannt'}</Text>
+        {!!providers.length && (
+          <Text style={styles.providers} numberOfLines={1}>
+            {providers.slice(0, 3).map((provider) => provider.label).join(', ')}
+          </Text>
+        )}
       </View>
       {item.vote_average != null && <Text style={styles.rating}>★ {item.vote_average.toFixed(1)}</Text>}
       <Pressable
@@ -43,6 +50,7 @@ const HistoryRow = memo(function HistoryRow({
 export default function HistoryScreen() {
   const { history, removeHistory } = useMovieMatch();
   const [query, setQuery] = useState('');
+  const hasProviderData = history.some((item) => item.watch_providers?.length);
   const filteredHistory = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('de');
     if (!needle) return history;
@@ -98,6 +106,9 @@ export default function HistoryScreen() {
         ListEmptyComponent={<Text style={styles.empty}>{history.length
           ? 'Keine passenden Einträge gefunden.'
           : 'Noch ist es hier still. Importiere deine Netflix-CSV, um loszulegen.'}</Text>}
+        ListFooterComponent={hasProviderData
+          ? <Text style={styles.attribution}>Streamingdaten von JustWatch</Text>
+          : null}
         initialNumToRender={10}
         maxToRenderPerBatch={8}
         windowSize={7}
@@ -123,6 +134,8 @@ const styles = StyleSheet.create({
   name: { color: Colors.text, fontSize: 16, fontWeight: '700' },
   meta: { color: Colors.muted, fontSize: 12 },
   genres: { color: Colors.muted, fontSize: 12 },
+  providers: { color: Colors.success, fontSize: 11 },
+  attribution: { color: Colors.muted, fontSize: 10, textAlign: 'center', marginTop: 10 },
   rating: { color: '#FFD166', fontWeight: '700', alignSelf: 'flex-start', marginTop: 4, fontSize: 12 },
   deleteButton: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 });

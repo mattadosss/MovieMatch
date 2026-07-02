@@ -9,7 +9,7 @@ import { getSimilarRecommendation, searchMovies } from '@/lib/tmdb';
 import { MovieSearchResult } from '@/types/movie';
 
 export default function SimilarScreen() {
-  const { history, setRecommendation, setRecommendationMode } = useMovieMatch();
+  const { history, preferredProviderIds, setRecommendation, setRecommendationMode } = useMovieMatch();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MovieSearchResult[]>([]);
   const [busy, setBusy] = useState(false);
@@ -27,7 +27,7 @@ export default function SimilarScreen() {
   async function select(movie: MovieSearchResult) {
     setBusy(true); setError('');
     try {
-      setRecommendation(await getSimilarRecommendation(movie.tmdb_id, history));
+      setRecommendation(await getSimilarRecommendation(movie.tmdb_id, history, preferredProviderIds));
       setRecommendationMode({ type: 'similar', movieId: movie.tmdb_id });
       router.replace('/recommendation');
     } catch (cause) {

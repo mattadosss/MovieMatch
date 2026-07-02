@@ -1,5 +1,25 @@
 export type MediaType = 'movie' | 'tv';
 export type WatchSource = 'netflix_csv' | 'manual' | 'marked_from_suggestion';
+export type WatchProviderType = 'flatrate' | 'free' | 'ads' | 'rent' | 'buy';
+
+export type WatchProviderAvailability = {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string | null;
+  type: WatchProviderType;
+};
+
+export type WatchProvider = {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string | null;
+  display_priority: number;
+};
+
+export type StreamingPreferences = {
+  provider_ids: number[];
+  updated_at: string;
+};
 
 export type WatchHistoryEntry = {
   id: string;
@@ -15,6 +35,8 @@ export type WatchHistoryEntry = {
   vote_average: number | null;
   release_year: number | null;
   poster_path: string | null;
+  watch_providers?: WatchProviderAvailability[];
+  watch_provider_link?: string | null;
   match_status: 'matched' | 'unmatched';
   created_at: string;
   updated_at?: string;
@@ -39,6 +61,8 @@ export type Recommendation = {
   vote_average: number;
   release_year: number | null;
   poster_path: string | null;
+  watch_providers?: WatchProviderAvailability[];
+  watch_provider_link?: string | null;
 };
 
 export type MovieSearchResult = {
