@@ -3,6 +3,7 @@ export type WatchSource = 'netflix_csv' | 'manual' | 'marked_from_suggestion';
 
 export type WatchHistoryEntry = {
   id: string;
+  user_id?: string;
   raw_title: string;
   parsed_title: string;
   watch_date: string;
@@ -16,6 +17,8 @@ export type WatchHistoryEntry = {
   poster_path: string | null;
   match_status: 'matched' | 'unmatched';
   created_at: string;
+  updated_at?: string;
+  deleted_at?: string | null;
   source: WatchSource;
 };
 
