@@ -116,6 +116,9 @@ npx supabase functions serve --env-file supabase/functions/.env
   die bei diesen Diensten im Abo, kostenlos oder werbefinanziert verfügbar sind.
   Gibt es keinen passenden Treffer, verwendet MovieMatch die normale Auswahl
   als Fallback.
+- Filmvorschläge können offline auf einer Watchlist gespeichert werden. Bei
+  angemeldeten Benutzern wird sie über `user_watchlist` synchronisiert; als
+  gesehen markierte Filme werden automatisch daraus entfernt.
 - Haben Lokal- und Cloud-Version dieselbe ID, gewinnt der neuere
   `updated_at`-Zeitstempel.
 - Löschungen werden als `deleted_at`-Tombstone synchronisiert, damit offline

@@ -65,6 +65,14 @@ export type Recommendation = {
   watch_provider_link?: string | null;
 };
 
+export type WatchlistEntry = Recommendation & {
+  id: string;
+  user_id?: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
 export type MovieSearchResult = {
   tmdb_id: number;
   title: string;

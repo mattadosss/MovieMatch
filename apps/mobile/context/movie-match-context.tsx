@@ -1,23 +1,28 @@
 import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cleanupHistoryDuplicates,
+  addWatchlistEntry,
   loadStreamingPreferences,
+  loadWatchlist,
   clearHistoryEntries,
   mergeHistory,
   recordSeenEntry,
   removeHistoryEntry,
+  removeWatchlistEntry,
   saveStreamingPreferences,
 } from '@/lib/storage';
 import { buildGenreProfile } from '@/lib/profile';
 import { syncHistory } from '@/lib/sync';
-import { Recommendation, RecommendationMode, WatchHistoryEntry } from '@/types/movie';
+import { Recommendation, RecommendationMode, WatchHistoryEntry, WatchlistEntry } from '@/types/movie';
 import { useAuth } from '@/context/auth-context';
 import { syncStreamingPreferences } from '@/lib/preferences';
+import { syncWatchlist } from '@/lib/watchlist-sync';
 
 type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 type ContextValue = {
   history: WatchHistoryEntry[];
+  watchlist: WatchlistEntry[];
   profile: ReturnType<typeof buildGenreProfile>;
   recommendation: Recommendation | null;
   setRecommendation: (value: Recommendation | null) => void;
@@ -26,6 +31,8 @@ type ContextValue = {
   addHistory: (entries: WatchHistoryEntry[]) => Promise<void>;
   removeHistory: (id: string) => Promise<void>;
   clearHistory: () => Promise<void>;
+  addToWatchlist: (movie: Recommendation) => Promise<void>;
+  removeFromWatchlist: (tmdbId: number) => Promise<void>;
   markRecommendationSeen: () => Promise<WatchHistoryEntry[] | null>;
   syncNow: () => Promise<void>;
   syncStatus: SyncStatus;
@@ -40,6 +47,7 @@ const MovieMatchContext = createContext<ContextValue | null>(null);
 export function MovieMatchProvider({ children }: PropsWithChildren) {
   const { user } = useAuth();
   const [history, setHistory] = useState<WatchHistoryEntry[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>({ type: 'profile' });
   const [loading, setLoading] = useState(true);
@@ -49,10 +57,11 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
   const preferencesSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    Promise.all([cleanupHistoryDuplicates(), loadStreamingPreferences()])
-      .then(([entries, preferences]) => {
+    Promise.all([cleanupHistoryDuplicates(), loadStreamingPreferences(), loadWatchlist()])
+      .then(([entries, preferences, savedMovies]) => {
         setHistory(entries);
         setPreferredProviderIds(preferences.provider_ids);
+        setWatchlist(savedMovies);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -62,12 +71,14 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
     setSyncStatus('syncing');
     setSyncError('');
     try {
-      const [entries, preferences] = await Promise.all([
+      const [entries, preferences, savedMovies] = await Promise.all([
         syncHistory(user),
         syncStreamingPreferences(user),
+        syncWatchlist(user),
       ]);
       setHistory(entries);
       setPreferredProviderIds(preferences.provider_ids);
+      setWatchlist(savedMovies);
       setSyncStatus('success');
     } catch (cause) {
       setSyncStatus('error');
@@ -122,6 +133,16 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
     if (user) setHistory(await syncHistory(user));
   }, [user]);
 
+  const addToWatchlist = useCallback(async (movie: Recommendation) => {
+    setWatchlist(await addWatchlistEntry(movie));
+    if (user) syncWatchlist(user).then(setWatchlist).catch(() => undefined);
+  }, [user]);
+
+  const removeFromWatchlist = useCallback(async (tmdbId: number) => {
+    setWatchlist(await removeWatchlistEntry(tmdbId));
+    if (user) syncWatchlist(user).then(setWatchlist).catch(() => undefined);
+  }, [user]);
+
   const markRecommendationSeen = useCallback(async () => {
     if (!recommendation) return null;
     const now = new Date().toISOString();
@@ -137,17 +158,18 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
     };
     const next = await recordSeenEntry(entry);
     setHistory(next);
+    setWatchlist(await removeWatchlistEntry(recommendation.tmdb_id));
     if (user) syncNow().catch(() => undefined);
     return next;
   }, [recommendation, syncNow, user]);
 
   const value = useMemo(() => ({
-    history, profile: buildGenreProfile(history), recommendation, setRecommendation,
+    history, watchlist, profile: buildGenreProfile(history), recommendation, setRecommendation,
     recommendationMode, setRecommendationMode,
-    addHistory, removeHistory, clearHistory, markRecommendationSeen, loading,
+    addHistory, removeHistory, clearHistory, addToWatchlist, removeFromWatchlist, markRecommendationSeen, loading,
     syncNow, syncStatus, syncError,
     preferredProviderIds, togglePreferredProvider,
-  }), [addHistory, clearHistory, history, loading, markRecommendationSeen, preferredProviderIds, recommendation, recommendationMode, removeHistory, syncError, syncNow, syncStatus, togglePreferredProvider]);
+  }), [addHistory, addToWatchlist, clearHistory, history, loading, markRecommendationSeen, preferredProviderIds, recommendation, recommendationMode, removeFromWatchlist, removeHistory, syncError, syncNow, syncStatus, togglePreferredProvider, watchlist]);
 
   return <MovieMatchContext.Provider value={value}>{children}</MovieMatchContext.Provider>;
 }

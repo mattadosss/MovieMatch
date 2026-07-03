@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/colors';
@@ -9,6 +9,7 @@ import { useMovieMatch } from '@/context/movie-match-context';
 import { formatWatchProviders } from '@/lib/providers';
 import { selectProfileGenreIds } from '@/lib/profile';
 import { getRecommendation, getRewatchRecommendation, getSimilarRecommendation } from '@/lib/tmdb';
+import type { Recommendation, WatchHistoryEntry } from '@/types/movie';
 
 export default function RecommendationScreen() {
   const insets = useSafeAreaInsets();
@@ -18,45 +19,96 @@ export default function RecommendationScreen() {
     recommendationMode,
     profile,
     history,
+    watchlist,
+    addToWatchlist,
+    removeFromWatchlist,
     markRecommendationSeen,
     preferredProviderIds,
   } = useMovieMatch();
   const [busy, setBusy] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'loading-next'>('idle');
+  const [prefetchedRecommendation, setPrefetchedRecommendation] = useState<Recommendation | null>(null);
 
-  async function loadAnother(nextHistory = history) {
+  const fetchAnother = useCallback(async (
+    nextHistory: WatchHistoryEntry[],
+    excludeMovieId?: number,
+  ) => {
     if (recommendationMode.type === 'similar') {
-      setRecommendation(await getSimilarRecommendation(recommendationMode.movieId, nextHistory, preferredProviderIds));
-    } else if (recommendationMode.type === 'rewatch') {
-      setRecommendation(await getRewatchRecommendation(nextHistory, recommendation?.tmdb_id, preferredProviderIds));
-    } else {
-      const genreIds = recommendationMode.type === 'genres'
-        ? recommendationMode.genreIds
-        : selectProfileGenreIds(profile);
-      setRecommendation(await getRecommendation(genreIds, nextHistory, preferredProviderIds));
+      return getSimilarRecommendation(recommendationMode.movieId, nextHistory, preferredProviderIds);
     }
-  }
+    if (recommendationMode.type === 'rewatch') {
+      return getRewatchRecommendation(nextHistory, excludeMovieId, preferredProviderIds);
+    }
+    const genreIds = recommendationMode.type === 'genres'
+      ? recommendationMode.genreIds
+      : selectProfileGenreIds(profile);
+    return getRecommendation(genreIds, nextHistory, preferredProviderIds);
+  }, [preferredProviderIds, profile, recommendationMode]);
+
+  useEffect(() => {
+    if (!recommendation) return;
+    let cancelled = false;
+    setPrefetchedRecommendation(null);
+    const optimisticHistory: WatchHistoryEntry[] = [
+      {
+        id: `prefetch-${recommendation.tmdb_id}`,
+        raw_title: recommendation.title,
+        parsed_title: recommendation.title,
+        watch_date: new Date().toISOString(),
+        tmdb_id: recommendation.tmdb_id,
+        media_type: 'movie',
+        genre_ids: recommendation.genre_ids,
+        genre_names: recommendation.genre_names,
+        runtime_minutes: recommendation.runtime_minutes,
+        vote_average: recommendation.vote_average,
+        release_year: recommendation.release_year,
+        poster_path: recommendation.poster_path,
+        watch_providers: recommendation.watch_providers,
+        watch_provider_link: recommendation.watch_provider_link,
+        match_status: 'matched',
+        source: 'marked_from_suggestion',
+        created_at: new Date().toISOString(),
+      },
+      ...history,
+    ];
+    fetchAnother(optimisticHistory, recommendation.tmdb_id)
+      .then((next) => {
+        if (!cancelled) setPrefetchedRecommendation(next);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [fetchAnother, history, recommendation]);
 
   async function markSeen() {
+    if (!recommendation) return;
+    const previousRecommendation = recommendation;
+    const optimisticNext = prefetchedRecommendation;
     setBusy(true);
     setSaveState('saving');
+    if (optimisticNext) {
+      setPrefetchedRecommendation(null);
+      setRecommendation(optimisticNext);
+    }
     try {
       const nextHistory = await markRecommendationSeen();
       if (!nextHistory) return;
       setSaveState('saved');
-      await new Promise((resolve) => setTimeout(resolve, 650));
-      try {
+      if (!optimisticNext) {
         setSaveState('loading-next');
-        await loadAnother(nextHistory);
-      } catch (cause) {
-        Alert.alert(
-          'Film gespeichert',
-          cause instanceof Error
-            ? `Der nächste Vorschlag konnte nicht geladen werden: ${cause.message}`
-            : 'Der nächste Vorschlag konnte nicht geladen werden.',
-        );
+        try {
+          setRecommendation(await fetchAnother(nextHistory, previousRecommendation.tmdb_id));
+        } catch (cause) {
+          Alert.alert(
+            'Film gespeichert',
+            cause instanceof Error
+              ? `Der nächste Vorschlag konnte nicht geladen werden: ${cause.message}`
+              : 'Der nächste Vorschlag konnte nicht geladen werden.',
+          );
+        }
       }
+      await new Promise((resolve) => setTimeout(resolve, 300));
     } catch (cause) {
+      if (optimisticNext) setRecommendation(previousRecommendation);
       Alert.alert('Fehler', cause instanceof Error ? cause.message : 'Der Film konnte nicht gespeichert werden.');
     } finally {
       setSaveState('idle');
@@ -65,9 +117,15 @@ export default function RecommendationScreen() {
   }
 
   async function another() {
+    if (prefetchedRecommendation) {
+      const next = prefetchedRecommendation;
+      setPrefetchedRecommendation(null);
+      setRecommendation(next);
+      return;
+    }
     setBusy(true);
     try {
-      await loadAnother();
+      setRecommendation(await fetchAnother(history, recommendation?.tmdb_id));
     } catch (cause) {
       Alert.alert('Kein weiterer Film', cause instanceof Error ? cause.message : 'Der Vorschlag ist fehlgeschlagen.');
     } finally {
@@ -77,6 +135,7 @@ export default function RecommendationScreen() {
 
   if (!recommendation) return null;
   const providers = formatWatchProviders(recommendation.watch_providers);
+  const isWatchlisted = watchlist.some((entry) => entry.tmdb_id === recommendation.tmdb_id);
 
   return (
     <View style={styles.root}>
@@ -144,6 +203,21 @@ export default function RecommendationScreen() {
                   : 'Als gesehen markieren'}
           </Text>
         </Pressable>
+        <Pressable
+          style={[styles.watchlistButton, isWatchlisted && styles.watchlistButtonActive]}
+          disabled={busy}
+          onPress={() => isWatchlisted
+            ? removeFromWatchlist(recommendation.tmdb_id)
+            : addToWatchlist(recommendation)}>
+          <Ionicons
+            name={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
+            color={isWatchlisted ? Colors.red : Colors.text}
+            size={19}
+          />
+          <Text style={[styles.watchlistText, isWatchlisted && styles.watchlistTextActive]}>
+            {isWatchlisted ? 'Aus Watchlist entfernen' : 'Zur Watchlist hinzufügen'}
+          </Text>
+        </Pressable>
         <Pressable style={styles.secondary} onPress={another} disabled={busy}>
           {busy && saveState === 'idle'
             ? <ActivityIndicator color={Colors.text} />
@@ -156,7 +230,7 @@ export default function RecommendationScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-  screen: { flexGrow: 1, paddingBottom: 220, backgroundColor: Colors.background },
+  screen: { flexGrow: 1, paddingBottom: 280, backgroundColor: Colors.background },
   close: { position: 'absolute', zIndex: 2, top: 54, right: 22, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000099', alignItems: 'center', justifyContent: 'center' },
   poster: { width: '100%', height: 490, backgroundColor: Colors.surface },
   gradient: { padding: 24, marginTop: -35, borderTopLeftRadius: 32, borderTopRightRadius: 32, backgroundColor: Colors.background, gap: 14 },
@@ -180,6 +254,10 @@ const styles = StyleSheet.create({
   primary: { height: 56, borderRadius: 17, backgroundColor: Colors.red, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center' },
   primarySaved: { backgroundColor: Colors.redDark },
   primaryText: { color: 'white', fontWeight: '700', fontSize: 16 },
+  watchlistButton: { height: 48, borderRadius: 15, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },
+  watchlistButtonActive: { borderColor: Colors.redDark, backgroundColor: '#2B1116' },
+  watchlistText: { color: Colors.text, fontSize: 14, fontWeight: '700' },
+  watchlistTextActive: { color: '#FF9AA4' },
   secondary: { height: 54, borderRadius: 17, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: Colors.text, fontWeight: '700', fontSize: 15 },
 });

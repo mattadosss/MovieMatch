@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StreamingPreferences, WatchHistoryEntry, WatchProvider } from '@/types/movie';
+import { Recommendation, StreamingPreferences, WatchHistoryEntry, WatchlistEntry, WatchProvider } from '@/types/movie';
 
 const HISTORY_KEY = '@moviematch/watch_history_entries';
 const GENRES_KEY = '@moviematch/movie_genres';
 const STREAMING_PREFERENCES_KEY = '@moviematch/streaming_preferences';
 const WATCH_PROVIDERS_KEY = '@moviematch/watch_providers_ch';
+const WATCHLIST_KEY = '@moviematch/watchlist';
 let historyWrite = Promise.resolve();
 
 export async function loadHistory(): Promise<WatchHistoryEntry[]> {
@@ -183,4 +184,51 @@ export async function cacheWatchProviders(providers: WatchProvider[]) {
     providers,
     cached_at: new Date().toISOString(),
   }));
+}
+
+export async function loadWatchlistIncludingDeleted(): Promise<WatchlistEntry[]> {
+  const value = await AsyncStorage.getItem(WATCHLIST_KEY);
+  if (!value) return [];
+  try {
+    return (JSON.parse(value) as WatchlistEntry[]).map((entry) => ({
+      ...entry,
+      updated_at: entry.updated_at ?? entry.created_at,
+      deleted_at: entry.deleted_at ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function loadWatchlist() {
+  return (await loadWatchlistIncludingDeleted()).filter((entry) => !entry.deleted_at);
+}
+
+export async function saveWatchlist(entries: WatchlistEntry[]) {
+  await AsyncStorage.setItem(WATCHLIST_KEY, JSON.stringify(entries));
+}
+
+export async function addWatchlistEntry(movie: Recommendation) {
+  const current = await loadWatchlistIncludingDeleted();
+  const now = new Date().toISOString();
+  const existing = current.find((entry) => entry.tmdb_id === movie.tmdb_id);
+  const entry: WatchlistEntry = {
+    ...movie,
+    id: existing?.id ?? `tmdb-${movie.tmdb_id}`,
+    user_id: existing?.user_id,
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+    deleted_at: null,
+  };
+  const next = [entry, ...current.filter((item) => item.tmdb_id !== movie.tmdb_id)];
+  await saveWatchlist(next);
+  return next.filter((item) => !item.deleted_at);
+}
+
+export async function removeWatchlistEntry(tmdbId: number) {
+  const now = new Date().toISOString();
+  const next = (await loadWatchlistIncludingDeleted()).map((entry) =>
+    entry.tmdb_id === tmdbId ? { ...entry, updated_at: now, deleted_at: now } : entry);
+  await saveWatchlist(next);
+  return next.filter((entry) => !entry.deleted_at);
 }
