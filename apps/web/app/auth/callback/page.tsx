@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { getSupabase } from "@/lib/supabase";
 import styles from "./callback.module.css";
 
 type ConfirmationState = {
@@ -61,8 +62,20 @@ export default function AuthCallbackPage() {
     () => "",
   );
   const state = getConfirmationState(url);
-  const callbackUrl = url ? new URL(url) : null;
+  const callbackUrl = useMemo(() => url ? new URL(url) : null, [url]);
   const appUrl = `moviematch://auth-callback${callbackUrl?.search ?? ""}${callbackUrl?.hash ?? ""}`;
+
+  useEffect(() => {
+    if (!callbackUrl || state.status !== "success") return;
+    const hash = new URLSearchParams(callbackUrl.hash.slice(1));
+    const code = callbackUrl.searchParams.get("code");
+    const accessToken = hash.get("access_token");
+    const refreshToken = hash.get("refresh_token");
+    if (code) getSupabase().auth.exchangeCodeForSession(code);
+    else if (accessToken && refreshToken) {
+      getSupabase().auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    }
+  }, [callbackUrl, state.status]);
 
   return (
     <main className={styles.page}>
@@ -83,10 +96,9 @@ export default function AuthCallbackPage() {
         {state.status !== "loading" && (
           <div className={styles.actions}>
             {state.status === "success" && (
-              <a className={styles.primary} href={appUrl}>
-                MovieMatch öffnen
-              </a>
+              <Link className={styles.primary} href="/app">Zur Web-App</Link>
             )}
+            {state.status === "success" && <a className={styles.secondary} href={appUrl}>Mobile App öffnen</a>}
             <Link className={styles.secondary} href="/">Zur Website</Link>
           </div>
         )}

@@ -1,5 +1,5 @@
 import type { User } from '@supabase/supabase-js';
-import { loadHistoryIncludingDeleted, saveHistory } from '@/lib/storage';
+import { deduplicateHistoryEntries, loadHistoryIncludingDeleted, saveHistory } from '@/lib/storage';
 import { supabase } from '@/src/lib/supabase';
 import type { WatchHistoryEntry } from '@/types/movie';
 
@@ -39,7 +39,6 @@ export async function syncHistory(user: User): Promise<WatchHistoryEntry[]> {
   const localById = new Map(localForUser.map((entry) => [entry.id, entry]));
   const remoteById = new Map(remote.map((entry) => [entry.id, entry]));
   const mergedForUser: WatchHistoryEntry[] = [];
-  const pushToCloud: CloudHistoryEntry[] = [];
 
   for (const id of new Set([...localById.keys(), ...remoteById.keys()])) {
     const localEntry = localById.get(id);
@@ -53,21 +52,21 @@ export async function syncHistory(user: User): Promise<WatchHistoryEntry[]> {
     if (localEntry && (!remoteEntry || timestamp(localEntry) > timestamp(remoteEntry))) {
       const cloudEntry = toCloud(localEntry, user.id);
       mergedForUser.push(cloudEntry);
-      pushToCloud.push(cloudEntry);
       continue;
     }
 
     if (remoteEntry) mergedForUser.push(remoteEntry);
   }
 
-  if (pushToCloud.length) {
+  const deduplicatedForUser = deduplicateHistoryEntries(mergedForUser);
+  if (deduplicatedForUser.length) {
     const { error: upsertError } = await supabase
       .from(TABLE)
-      .upsert(pushToCloud, { onConflict: 'id,user_id' });
+      .upsert(deduplicatedForUser.map((entry) => toCloud(entry, user.id)), { onConflict: 'id,user_id' });
     if (upsertError) throw upsertError;
   }
 
-  const allLocal = [...mergedForUser, ...otherUsersLocal];
+  const allLocal = [...deduplicatedForUser, ...otherUsersLocal];
   await saveHistory(allLocal);
-  return mergedForUser.filter((entry) => !entry.deleted_at);
+  return deduplicatedForUser.filter((entry) => !entry.deleted_at);
 }

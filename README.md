@@ -133,6 +133,24 @@ npm run ios          # Expo auf iOS
 npm run expo:web     # optionale Expo-Web-Ausgabe
 ```
 
+### Next.js-Web-App
+
+Die vollständige Web-App läuft unter `/app` und bietet denselben Kernablauf wie
+Mobile: Gastmodus, Anmeldung, Netflix-CSV-Import, manuellen Import, Verlauf,
+Empfehlungen, Streaming-Präferenzen und Supabase-Sync.
+
+Für `apps/web/.env.local` beziehungsweise in den Vercel Environment Variables
+werden diese öffentlichen Werte benötigt:
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+```
+
+Auf Vercel müssen beide Variablen für Production gesetzt und das Projekt danach
+neu deployed werden. Der TMDb-Token gehört weiterhin ausschließlich in das
+Supabase Function Secret `TMDB_ACCESS_TOKEN`.
+
 ## Prüfung
 
 ```bash

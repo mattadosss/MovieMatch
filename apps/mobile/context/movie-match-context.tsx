@@ -1,6 +1,6 @@
 import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  loadHistory,
+  cleanupHistoryDuplicates,
   loadStreamingPreferences,
   clearHistoryEntries,
   mergeHistory,
@@ -49,7 +49,7 @@ export function MovieMatchProvider({ children }: PropsWithChildren) {
   const preferencesSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    Promise.all([loadHistory(), loadStreamingPreferences()])
+    Promise.all([cleanupHistoryDuplicates(), loadStreamingPreferences()])
       .then(([entries, preferences]) => {
         setHistory(entries);
         setPreferredProviderIds(preferences.provider_ids);

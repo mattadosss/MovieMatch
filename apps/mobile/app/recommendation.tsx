@@ -22,6 +22,7 @@ export default function RecommendationScreen() {
     preferredProviderIds,
   } = useMovieMatch();
   const [busy, setBusy] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'loading-next'>('idle');
 
   async function loadAnother(nextHistory = history) {
     if (recommendationMode.type === 'similar') {
@@ -38,10 +39,14 @@ export default function RecommendationScreen() {
 
   async function markSeen() {
     setBusy(true);
+    setSaveState('saving');
     try {
       const nextHistory = await markRecommendationSeen();
       if (!nextHistory) return;
+      setSaveState('saved');
+      await new Promise((resolve) => setTimeout(resolve, 650));
       try {
+        setSaveState('loading-next');
         await loadAnother(nextHistory);
       } catch (cause) {
         Alert.alert(
@@ -54,6 +59,7 @@ export default function RecommendationScreen() {
     } catch (cause) {
       Alert.alert('Fehler', cause instanceof Error ? cause.message : 'Der Film konnte nicht gespeichert werden.');
     } finally {
+      setSaveState('idle');
       setBusy(false);
     }
   }
@@ -115,12 +121,31 @@ export default function RecommendationScreen() {
       </ScrollView>
 
       <View style={[styles.floatingActions, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <Pressable style={styles.primary} onPress={markSeen} disabled={busy}>
-          <Ionicons name="checkmark" color="white" size={20} />
-          <Text style={styles.primaryText}>Als gesehen markieren</Text>
+        {saveState === 'saved' && (
+          <View style={styles.savedToast}>
+            <Ionicons name="checkmark-circle" color={Colors.red} size={20} />
+            <Text style={styles.savedToastText}>Im Verlauf gespeichert</Text>
+          </View>
+        )}
+        <Pressable
+          style={[styles.primary, saveState === 'saved' && styles.primarySaved]}
+          onPress={markSeen}
+          disabled={busy}>
+          {saveState === 'saving' || saveState === 'loading-next'
+            ? <ActivityIndicator color="white" />
+            : <Ionicons name={saveState === 'saved' ? 'checkmark-circle' : 'checkmark'} color="white" size={20} />}
+          <Text style={styles.primaryText}>
+            {saveState === 'saving'
+              ? 'Wird gespeichert …'
+              : saveState === 'saved'
+                ? 'Gespeichert!'
+                : saveState === 'loading-next'
+                  ? 'Nächster Film …'
+                  : 'Als gesehen markieren'}
+          </Text>
         </Pressable>
         <Pressable style={styles.secondary} onPress={another} disabled={busy}>
-          {busy
+          {busy && saveState === 'idle'
             ? <ActivityIndicator color={Colors.text} />
             : <><Ionicons name="shuffle" color={Colors.text} size={19} /><Text style={styles.secondaryText}>Anderen Film zeigen</Text></>}
         </Pressable>
@@ -131,7 +156,7 @@ export default function RecommendationScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-  screen: { flexGrow: 1, paddingBottom: 170, backgroundColor: Colors.background },
+  screen: { flexGrow: 1, paddingBottom: 220, backgroundColor: Colors.background },
   close: { position: 'absolute', zIndex: 2, top: 54, right: 22, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000099', alignItems: 'center', justifyContent: 'center' },
   poster: { width: '100%', height: 490, backgroundColor: Colors.surface },
   gradient: { padding: 24, marginTop: -35, borderTopLeftRadius: 32, borderTopRightRadius: 32, backgroundColor: Colors.background, gap: 14 },
@@ -150,7 +175,10 @@ const styles = StyleSheet.create({
   attribution: { color: Colors.muted, fontSize: 10 },
   providerLink: { color: Colors.red, fontSize: 11, fontWeight: '700' },
   floatingActions: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 12, paddingHorizontal: 18, gap: 9, backgroundColor: '#0A0A0BF2', borderTopWidth: 1, borderTopColor: Colors.border },
+  savedToast: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, borderWidth: 1, borderColor: Colors.redDark, backgroundColor: '#2B1116' },
+  savedToastText: { color: '#FF9AA4', fontSize: 13, fontWeight: '700' },
   primary: { height: 56, borderRadius: 17, backgroundColor: Colors.red, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center' },
+  primarySaved: { backgroundColor: Colors.redDark },
   primaryText: { color: 'white', fontWeight: '700', fontSize: 16 },
   secondary: { height: 54, borderRadius: 17, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: Colors.text, fontWeight: '700', fontSize: 15 },

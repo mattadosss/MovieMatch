@@ -9,7 +9,7 @@ export default function Home() {
     <main>
       <nav>
         <a className="brand" href="#">MOVIEMATCH</a>
-        <a className="navLink" href="#so-funktionierts">So funktioniert&apos;s</a>
+        <a className="navLink" href="/app">Web-App öffnen →</a>
       </nav>
 
       <section className="hero">
@@ -21,7 +21,7 @@ export default function Home() {
             die wirklich zu deinem Geschmack passen.
           </p>
           <div className="actions">
-            <a className="primary" href="#start">Verlauf importieren <span>→</span></a>
+            <a className="primary" href="/app">Web-App starten <span>→</span></a>
             <a className="secondary" href="#so-funktionierts">Mehr erfahren</a>
           </div>
         </div>

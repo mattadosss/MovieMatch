@@ -30,22 +30,54 @@ export async function saveHistory(entries: WatchHistoryEntry[]) {
   await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
 }
 
+export function deduplicateHistoryEntries(entries: WatchHistoryEntry[]) {
+  const now = new Date().toISOString();
+  const newestByKey = new Map<string, WatchHistoryEntry>();
+
+  for (const entry of entries.filter((item) => !item.deleted_at)) {
+    const key = entry.tmdb_id != null
+      ? `${entry.media_type}:${entry.tmdb_id}`
+      : `${entry.raw_title.trim().toLocaleLowerCase('de')}|${entry.watch_date}`;
+    const current = newestByKey.get(key);
+    if (!current || Date.parse(entry.watch_date) > Date.parse(current.watch_date)) {
+      newestByKey.set(key, entry);
+    }
+  }
+
+  const keepIds = new Set([...newestByKey.values()].map((entry) => entry.id));
+  return entries.map((entry) =>
+    !entry.deleted_at && !keepIds.has(entry.id)
+      ? { ...entry, updated_at: now, deleted_at: now }
+      : entry);
+}
+
+export async function cleanupHistoryDuplicates() {
+  let result: WatchHistoryEntry[] = [];
+  historyWrite = historyWrite.catch(() => undefined).then(async () => {
+    const all = deduplicateHistoryEntries(await loadHistoryIncludingDeleted());
+    await saveHistory(all);
+    result = all.filter((entry) => !entry.deleted_at);
+  });
+  await historyWrite;
+  return result;
+}
+
 export async function mergeHistory(entries: WatchHistoryEntry[]) {
   let result: WatchHistoryEntry[] = [];
   historyWrite = historyWrite.catch(() => undefined).then(async () => {
     const current = await loadHistoryIncludingDeleted();
     const now = new Date().toISOString();
-    const normalized = entries.map((entry) => ({
+    const normalized = deduplicateHistoryEntries(entries.map((entry) => ({
       ...entry,
       updated_at: entry.updated_at ?? entry.created_at ?? now,
       deleted_at: null,
-    }));
+    }))).filter((entry) => !entry.deleted_at);
     const ids = new Set(normalized.flatMap((item) => item.tmdb_id == null ? [] : [`${item.media_type}:${item.tmdb_id}`]));
     const keys = new Set(normalized.map((item) => `${item.raw_title}|${item.watch_date}`));
-    const all = [...normalized, ...current.filter((item) =>
+    const all = deduplicateHistoryEntries([...normalized, ...current.filter((item) =>
       !keys.has(`${item.raw_title}|${item.watch_date}`)
       && (item.tmdb_id == null || !ids.has(`${item.media_type}:${item.tmdb_id}`))
-    )];
+    )]);
     await saveHistory(all);
     result = all.filter((item) => !item.deleted_at);
   });
