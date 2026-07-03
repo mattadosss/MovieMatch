@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/colors';
 import { useMovieMatch } from '@/context/movie-match-context';
+import { partnerHistoryEntries } from '@/lib/partner';
 import { formatWatchProviders } from '@/lib/providers';
 import { selectProfileGenreIds } from '@/lib/profile';
 import { getRecommendation, getRewatchRecommendation, getSimilarRecommendation } from '@/lib/tmdb';
@@ -28,25 +29,33 @@ export default function RecommendationScreen() {
   const [busy, setBusy] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'loading-next'>('idle');
   const [prefetchedRecommendation, setPrefetchedRecommendation] = useState<Recommendation | null>(null);
+  const shownMovieIds = useRef(new Set<number>());
 
   const fetchAnother = useCallback(async (
     nextHistory: WatchHistoryEntry[],
     excludeMovieId?: number,
   ) => {
+    const shownHistory = partnerHistoryEntries([...shownMovieIds.current]);
+    const effectiveHistory = recommendationMode.type === 'together'
+      ? [...nextHistory, ...shownHistory, ...partnerHistoryEntries(recommendationMode.partnerMovieIds)]
+      : [...nextHistory, ...shownHistory];
     if (recommendationMode.type === 'similar') {
-      return getSimilarRecommendation(recommendationMode.movieId, nextHistory, preferredProviderIds);
+      return getSimilarRecommendation(recommendationMode.movieId, effectiveHistory, preferredProviderIds);
     }
     if (recommendationMode.type === 'rewatch') {
-      return getRewatchRecommendation(nextHistory, excludeMovieId, preferredProviderIds);
+      const remainingHistory = nextHistory.filter((entry) =>
+        entry.tmdb_id == null || !shownMovieIds.current.has(entry.tmdb_id));
+      return getRewatchRecommendation(remainingHistory, excludeMovieId, preferredProviderIds);
     }
     const genreIds = recommendationMode.type === 'genres'
       ? recommendationMode.genreIds
       : selectProfileGenreIds(profile);
-    return getRecommendation(genreIds, nextHistory, preferredProviderIds);
+    return getRecommendation(genreIds, effectiveHistory, preferredProviderIds);
   }, [preferredProviderIds, profile, recommendationMode]);
 
   useEffect(() => {
     if (!recommendation) return;
+    shownMovieIds.current.add(recommendation.tmdb_id);
     let cancelled = false;
     setPrefetchedRecommendation(null);
     const optimisticHistory: WatchHistoryEntry[] = [
@@ -97,13 +106,8 @@ export default function RecommendationScreen() {
         setSaveState('loading-next');
         try {
           setRecommendation(await fetchAnother(nextHistory, previousRecommendation.tmdb_id));
-        } catch (cause) {
-          Alert.alert(
-            'Film gespeichert',
-            cause instanceof Error
-              ? `Der nächste Vorschlag konnte nicht geladen werden: ${cause.message}`
-              : 'Der nächste Vorschlag konnte nicht geladen werden.',
-          );
+        } catch {
+          router.back();
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -126,8 +130,8 @@ export default function RecommendationScreen() {
     setBusy(true);
     try {
       setRecommendation(await fetchAnother(history, recommendation?.tmdb_id));
-    } catch (cause) {
-      Alert.alert('Kein weiterer Film', cause instanceof Error ? cause.message : 'Der Vorschlag ist fehlgeschlagen.');
+    } catch {
+      router.back();
     } finally {
       setBusy(false);
     }
@@ -147,7 +151,11 @@ export default function RecommendationScreen() {
           ? <Image source={`https://image.tmdb.org/t/p/w780${recommendation.poster_path}`} style={styles.poster} contentFit="cover" />
           : <View style={styles.poster} />}
         <View style={styles.gradient}>
-          <Text style={styles.eyebrow}>DEIN MATCH</Text>
+          <Text style={styles.eyebrow}>
+            {recommendationMode.type === 'together'
+              ? `MATCH FÜR DICH & @${recommendationMode.partnerUsername}`
+              : 'DEIN MATCH'}
+          </Text>
           <Text style={styles.title}>{recommendation.title}</Text>
           <Text style={styles.meta}>
             {[recommendation.release_year, recommendation.runtime_minutes ? `${recommendation.runtime_minutes} Min.` : null, `★ ${recommendation.vote_average.toFixed(1)}`].filter(Boolean).join('  ·  ')}

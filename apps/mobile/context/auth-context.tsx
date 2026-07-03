@@ -5,11 +5,14 @@ import { authRedirectUrl, supabase } from '@/src/lib/supabase';
 type AuthContextValue = {
   session: Session | null;
   user: User | null;
+  username: string | null;
+  profileLoading: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<boolean>;
   resendConfirmation: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
+  updateUsername: (username: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -17,6 +20,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [username, setUsername] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession()
@@ -33,6 +38,30 @@ export function AuthProvider({ children }: PropsWithChildren) {
     });
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const user = session?.user;
+    if (!user?.email) {
+      setUsername(null);
+      return;
+    }
+    setProfileLoading(true);
+    async function loadProfile() {
+      try {
+        const { data, error } = await supabase.from('profiles')
+          .upsert({ user_id: user!.id, email: user!.email! }, { onConflict: 'user_id' })
+          .select('username')
+          .single();
+        if (error) throw error;
+        setUsername(data.username);
+      } catch (error) {
+        console.warn('Profil konnte nicht geladen werden.', error);
+      } finally {
+        setProfileLoading(false);
+      }
+    }
+    void loadProfile();
+  }, [session]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
@@ -63,15 +92,32 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (error) throw error;
   }, []);
 
+  const updateUsername = useCallback(async (value: string) => {
+    if (!session?.user) throw new Error('Du musst angemeldet sein.');
+    const normalized = value.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,24}$/.test(normalized)) {
+      throw new Error('Der Benutzername braucht 3–24 Zeichen und darf nur Buchstaben, Zahlen und _ enthalten.');
+    }
+    const { error } = await supabase.from('profiles')
+      .update({ username: normalized, updated_at: new Date().toISOString() })
+      .eq('user_id', session.user.id);
+    if (error?.code === '23505') throw new Error('Dieser Benutzername ist bereits vergeben.');
+    if (error) throw error;
+    setUsername(normalized);
+  }, [session]);
+
   const value = useMemo(() => ({
     session,
     user: session?.user ?? null,
+    username,
+    profileLoading,
     loading,
     signIn,
     signUp,
     resendConfirmation,
     signOut,
-  }), [loading, resendConfirmation, session, signIn, signOut, signUp]);
+    updateUsername,
+  }), [loading, profileLoading, resendConfirmation, session, signIn, signOut, signUp, updateUsername, username]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -10,7 +10,7 @@ import { getMovieWatchProviders } from '@/lib/tmdb';
 import type { WatchProvider } from '@/types/movie';
 
 export default function ProfileScreen() {
-  const { user, loading, signOut } = useAuth();
+  const { user, username, profileLoading, loading, signOut, updateUsername } = useAuth();
   const {
     clearHistory,
     preferredProviderIds,
@@ -27,6 +27,13 @@ export default function ProfileScreen() {
   const [providerQuery, setProviderQuery] = useState('');
   const [clearBusy, setClearBusy] = useState(false);
   const [clearError, setClearError] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [usernameMessage, setUsernameMessage] = useState('');
+
+  useEffect(() => {
+    setUsernameInput(username ?? '');
+  }, [username]);
 
   useEffect(() => {
     if (!user) return;
@@ -62,6 +69,19 @@ export default function ProfileScreen() {
       setLogoutError(cause instanceof Error ? cause.message : 'Abmeldung fehlgeschlagen.');
     } finally {
       setLogoutBusy(false);
+    }
+  }
+
+  async function saveUsername() {
+    setUsernameBusy(true);
+    setUsernameMessage('');
+    try {
+      await updateUsername(usernameInput);
+      setUsernameMessage('Benutzername gespeichert.');
+    } catch (cause) {
+      setUsernameMessage(cause instanceof Error ? cause.message : 'Benutzername konnte nicht gespeichert werden.');
+    } finally {
+      setUsernameBusy(false);
     }
   }
 
@@ -106,6 +126,39 @@ export default function ProfileScreen() {
               <Text style={styles.label}>ANGEMELDET ALS</Text>
               <Text style={styles.email} numberOfLines={1}>{user.email}</Text>
             </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <Ionicons name="at-outline" color={Colors.red} size={26} />
+              <View style={styles.rowText}>
+                <Text style={styles.cardTitle}>Dein Benutzername</Text>
+                <Text style={styles.description}>Andere können dich damit für gemeinsame Filmvorschläge finden.</Text>
+              </View>
+            </View>
+            <TextInput
+              value={usernameInput}
+              onChangeText={setUsernameInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={24}
+              placeholder="z. B. movie_fan"
+              placeholderTextColor={Colors.muted}
+              style={styles.usernameInput}
+            />
+            {!!usernameMessage && (
+              <Text style={usernameMessage.includes('gespeichert') ? styles.success : styles.error}>
+                {usernameMessage}
+              </Text>
+            )}
+            <Pressable
+              disabled={usernameBusy || profileLoading || usernameInput.trim().toLowerCase() === username}
+              onPress={saveUsername}
+              style={[styles.primary, (usernameBusy || profileLoading || usernameInput.trim().toLowerCase() === username) && styles.disabled]}>
+              {usernameBusy || profileLoading
+                ? <ActivityIndicator color="white" />
+                : <Text style={styles.primaryText}>{username ? 'Benutzername ändern' : 'Benutzername festlegen'}</Text>}
+            </Pressable>
           </View>
 
           <View style={styles.dangerCard}>
@@ -261,6 +314,8 @@ const styles = StyleSheet.create({
   attribution: { color: Colors.muted, fontSize: 10, textAlign: 'center' },
   search: { height: 48, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 15, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background },
   searchInput: { flex: 1, height: '100%', color: Colors.text, fontSize: 14 },
+  usernameInput: { height: 52, paddingHorizontal: 15, borderRadius: 15, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background, color: Colors.text, fontSize: 15 },
+  disabled: { opacity: 0.45 },
   dangerCard: { padding: 20, gap: 16, borderRadius: 24, backgroundColor: Colors.surface, borderWidth: 1, borderColor: '#57252B' },
   dangerButton: { minHeight: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 15, borderWidth: 1, borderColor: '#8B3540', backgroundColor: '#281216' },
   dangerButtonText: { color: '#FF8A95', fontSize: 14, fontWeight: '700' },

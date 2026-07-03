@@ -83,6 +83,11 @@ export default function HomeScreen() {
           <View style={styles.modeText}><Text style={styles.modeTitle}>Genre selbst wählen</Text><Text style={styles.modeSubtitle}>Passend zu deiner Stimmung</Text></View>
           <Ionicons name="chevron-forward" size={20} color={Colors.muted} />
         </Pressable>
+        <Pressable style={styles.mode} onPress={() => router.push('/together' as Href)}>
+          <Ionicons name="people-outline" size={25} color={Colors.red} />
+          <View style={styles.modeText}><Text style={styles.modeTitle}>Zusammen schauen</Text><Text style={styles.modeSubtitle}>Ein Film, den ihr beide noch nicht kennt</Text></View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.muted} />
+        </Pressable>
         <Pressable style={styles.mode} onPress={recommendRewatch}>
           <Ionicons name="refresh-outline" size={25} color={Colors.red} />
           <View style={styles.modeText}><Text style={styles.modeTitle}>Lange nicht gesehen</Text><Text style={styles.modeSubtitle}>Ein früherer Favorit für heute</Text></View>

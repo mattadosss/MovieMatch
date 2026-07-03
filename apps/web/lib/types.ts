@@ -48,3 +48,18 @@ export type Recommendation = Movie & {
   watch_providers: ProviderAvailability[];
   watch_provider_link: string | null;
 };
+export type WatchlistEntry = Omit<Recommendation, "id"> & {
+  id: string;
+  tmdb_id: number;
+  release_year: number | null;
+  user_id?: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+export type RecommendationMode =
+  | { type: "profile" }
+  | { type: "genres"; genreIds: number[] }
+  | { type: "similar"; movieId: number }
+  | { type: "together"; partnerUsername: string; partnerMovieIds: number[] }
+  | { type: "rewatch" };

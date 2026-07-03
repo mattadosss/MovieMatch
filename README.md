@@ -45,8 +45,9 @@ in der App niemals einen Supabase Secret Key oder Service-Role-Key.
 3. Im **SQL Editor** die Dateien aus `supabase/migrations` in zeitlicher
    Reihenfolge ausführen oder sie mit `supabase db push` anwenden. Die
    Migrationen erstellen die Verlaufstabelle einschließlich Streaming-Anbietern,
-   aktivieren Row Level Security und erlauben angemeldeten Benutzern
-   ausschließlich Zugriff auf ihre eigenen Datensätze.
+   Watchlists, Streaming-Präferenzen und Profile. Sie aktivieren Row Level
+   Security und erlauben angemeldeten Benutzern ausschließlich Zugriff auf ihre
+   eigenen Datensätze.
 4. Unter **Authentication → Providers → Email** E-Mail/Passwort aktivieren.
    Falls **Confirm email** aktiv ist, muss ein neues Konto vor der ersten
    Anmeldung über die empfangene E-Mail bestätigt werden.
@@ -57,11 +58,7 @@ in der App niemals einen Supabase Secret Key oder Service-Role-Key.
    Redirect URL: https://moviematchweb.vercel.app/auth/callback
    ```
 
-   Damit landen Bestätigungslinks immer auf einer öffentlich erreichbaren
-   Next.js-Seite. Diese zeigt Erfolg oder Fehler verständlich an und bietet für
-   installierte App-Builds zusätzlich einen `moviematch://`-Link zurück zur App.
-   Falls ein angepasstes Supabase-E-Mail-Template verwendet wird, muss dessen
-   Link `{{ .RedirectTo }}` statt `{{ .SiteURL }}` verwenden.
+   Damit landen Bestätigungslinks auf der öffentlich erreichbaren Next.js-Seite.
 6. Den Expo-Dev-Server nach Änderungen an `.env` neu starten.
 
 ### TMDb Edge Functions
@@ -126,6 +123,20 @@ npx supabase functions serve --env-file supabase/functions/.env
 - Bereits vorhandene lokale Gastdaten werden bei der ersten Synchronisierung
   dem angemeldeten Benutzer zugeordnet.
 
+### Benutzernamen und gemeinsame Vorschläge
+
+Angemeldete Personen können im Profil einen eindeutigen Benutzernamen aus
+3–24 Buchstaben, Zahlen oder Unterstrichen festlegen. Bestehende Konten erhalten
+zunächst keinen Benutzernamen und können ihn dort nachtragen. E-Mail-Adressen
+bleiben durch Supabase Auth und die Profiltabelle eindeutig; Benutzernamen sind
+zusätzlich ohne Beachtung der Groß-/Kleinschreibung eindeutig.
+
+Der Modus **Zusammen schauen** nimmt einen Benutzernamen entgegen und schlägt
+Filme vor, die in keinem der beiden Verläufe vorkommen. Die Datenbankfunktion
+gibt dafür ausschließlich die bereits gesehenen TMDb-IDs zurück – weder die
+E-Mail-Adresse noch der vollständige Verlauf des anderen Kontos werden
+freigegeben.
+
 ## Entwicklung
 
 ```bash
@@ -139,8 +150,10 @@ npm run expo:web     # optionale Expo-Web-Ausgabe
 ### Next.js-Web-App
 
 Die vollständige Web-App läuft unter `/app` und bietet denselben Kernablauf wie
-Mobile: Gastmodus, Anmeldung, Netflix-CSV-Import, manuellen Import, Verlauf,
-Empfehlungen, Streaming-Präferenzen und Supabase-Sync.
+Mobile: Gastmodus, Anmeldung, Netflix-CSV-Import, manuellen Import, durchsuchbaren
+Verlauf, Watchlist, Streaming-Präferenzen und Supabase-Sync. Neben dem
+Geschmacksprofil unterstützt sie Genre-Auswahl, ähnliche Filme,
+Wiederanschauen und gemeinsame Vorschläge per Benutzername.
 
 Für `apps/web/.env.local` beziehungsweise in den Vercel Environment Variables
 werden diese öffentlichen Werte benötigt:

@@ -35,7 +35,6 @@ export default function ImportScreen() {
     try {
       await addHistory([await movieToHistoryEntry(movie)]);
       setMessage(`„${movie.title}“ wurde zum Verlauf hinzugefügt.`);
-      setQuery(''); setResults([]);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Film konnte nicht hinzugefügt werden.');
     } finally { setBusy(false); }

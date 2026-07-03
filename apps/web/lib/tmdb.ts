@@ -94,3 +94,82 @@ export async function recommend(history: HistoryEntry[], genreIds: number[], pro
     watch_providers: entry.watch_providers, watch_provider_link: entry.watch_provider_link,
   } satisfies Recommendation;
 }
+
+async function prioritizeProviders(movies: Movie[], providerIds: number[]) {
+  if (!providerIds.length) return movies;
+  const preferred = new Set(providerIds);
+  const checked = await Promise.all(movies.slice(0, 5).map(async (movie) => ({
+    movie,
+    available: await availability(movie.id).catch(() => null),
+  })));
+  const matches = checked
+    .filter(({ available }) => available?.providers.some((provider) =>
+      preferred.has(provider.provider_id) && ["flatrate", "free", "ads"].includes(provider.type)))
+    .map(({ movie }) => movie);
+  return matches.length ? matches : movies;
+}
+
+export async function recommendSimilar(
+  movieId: number,
+  history: HistoryEntry[],
+  providerIds: number[],
+) {
+  const watched = new Set(history.filter((entry) => !entry.deleted_at).map((entry) => entry.tmdb_id));
+  const load = async (operation: "recommendations" | "similar") => {
+    const data = await invoke<{ results: Movie[] }>("movie-details", { operation, id: movieId });
+    return data.results.filter((movie) => !watched.has(movie.id));
+  };
+  let candidates = await load("recommendations");
+  if (!candidates.length) candidates = await load("similar");
+  candidates = await prioritizeProviders(candidates, providerIds);
+  if (!candidates.length) throw new Error("Keine passenden ungesehenen Filme gefunden.");
+  const movie = candidates[Math.floor(Math.random() * Math.min(candidates.length, 10))];
+  const entry = await enrichMovie(movie, "marked_from_suggestion");
+  return {
+    ...movie,
+    genre_names: entry.genre_names,
+    runtime_minutes: entry.runtime_minutes,
+    watch_providers: entry.watch_providers,
+    watch_provider_link: entry.watch_provider_link,
+  } satisfies Recommendation;
+}
+
+export async function recommendRewatch(
+  history: HistoryEntry[],
+  excludeMovieId: number | undefined,
+  providerIds: number[],
+) {
+  const cutoff = Date.now() - 180 * 24 * 60 * 60 * 1000;
+  let candidates = history
+    .filter((entry) =>
+      !entry.deleted_at
+      && entry.media_type === "movie"
+      && entry.tmdb_id != null
+      && entry.tmdb_id !== excludeMovieId
+      && Date.parse(entry.watch_date) <= cutoff)
+    .sort((a, b) => Date.parse(a.watch_date) - Date.parse(b.watch_date))
+    .slice(0, 10);
+  if (providerIds.length) {
+    const preferred = new Set(providerIds);
+    const matches = candidates.filter((entry) => entry.watch_providers.some((provider) =>
+      preferred.has(provider.provider_id) && ["flatrate", "free", "ads"].includes(provider.type)));
+    if (matches.length) candidates = matches;
+  }
+  const entry = candidates[Math.floor(Math.random() * candidates.length)];
+  if (!entry?.tmdb_id) {
+    throw new Error("Du hast noch keinen Film, den du seit mindestens sechs Monaten nicht gesehen hast.");
+  }
+  return {
+    id: entry.tmdb_id,
+    title: entry.parsed_title,
+    overview: "Diesen Film hast du schon lange nicht mehr gesehen – vielleicht ist heute der richtige Abend dafür.",
+    genre_ids: entry.genre_ids,
+    genre_names: entry.genre_names,
+    runtime_minutes: entry.runtime_minutes,
+    vote_average: entry.vote_average ?? 0,
+    release_date: entry.release_year ? `${entry.release_year}` : undefined,
+    poster_path: entry.poster_path,
+    watch_providers: entry.watch_providers,
+    watch_provider_link: entry.watch_provider_link,
+  } satisfies Recommendation;
+}

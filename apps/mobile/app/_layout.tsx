@@ -20,6 +20,7 @@ export default function RootLayout() {
             <Stack.Screen name="auth-callback" options={{ headerShown: false }} />
             <Stack.Screen name="recommendation" options={{ headerShown: false, presentation: 'modal' }} />
             <Stack.Screen name="similar" options={{ headerShown: false }} />
+            <Stack.Screen name="together" options={{ headerShown: false }} />
             <Stack.Screen name="genres" options={{ headerShown: false, presentation: 'modal' }} />
           </Stack>
           <StatusBar style="light" />

@@ -89,4 +89,5 @@ export type RecommendationMode =
   | { type: 'profile' }
   | { type: 'genres'; genreIds: number[] }
   | { type: 'similar'; movieId: number }
+  | { type: 'together'; partnerUsername: string; partnerMovieIds: number[] }
   | { type: 'rewatch' };
